@@ -41,7 +41,8 @@ export function hashToken(token: string): string {
 
 export async function verifyAccessToken(token: string): Promise<AuthenticatedUser> {
   try {
-    const { payload } = await jwtVerify(token, accessSecret);
+    // Pinning the algorithm rejects tokens re-signed with another HS* variant of the same secret.
+    const { payload } = await jwtVerify(token, accessSecret, { algorithms: ["HS256"] });
 
     if (!payload.sub || payload.kind !== "access" || !USER_ROLES.includes(payload.role as UserRole)) {
       throw new AppError(401, "Invalid access token", "INVALID_ACCESS_TOKEN");

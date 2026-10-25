@@ -14,7 +14,7 @@ declare global {
 export const requireAuth: RequestHandler = async (req, _res, next) => {
   const [scheme, token] = req.headers.authorization?.split(" ") ?? [];
 
-  if (scheme !== "Bearer" || !token) {
+  if (scheme?.toLowerCase() !== "bearer" || !token) {
     next(new AppError(401, "Authentication is required", "UNAUTHENTICATED"));
     return;
   }

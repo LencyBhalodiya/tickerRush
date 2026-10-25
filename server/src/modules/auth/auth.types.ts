@@ -27,7 +27,6 @@ export type AuthResponse = {
 
 export type SignUpResponse = {
   message: string;
-  user: AuthUser;
 };
 
 export type AuthenticatedUser = Pick<AuthUser, "id" | "role">;

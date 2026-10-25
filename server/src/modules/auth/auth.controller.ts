@@ -3,8 +3,8 @@ import { authService } from "./auth.service.js";
 import type { RefreshTokenInput, SignInInput, SignUpInput, SignUpResponse } from "./auth.types.js";
 
 export const signUp: RequestHandler<never, SignUpResponse, SignUpInput> = async (req, res) => {
-  const user = await authService.signUp(req.body);
-  res.status(201).json({ message: "Account created successfully", user });
+  await authService.signUp(req.body);
+  res.status(201).json({ message: "Account created successfully" });
 };
 
 export const signIn: RequestHandler<never, unknown, SignInInput> = async (req, res) => {
