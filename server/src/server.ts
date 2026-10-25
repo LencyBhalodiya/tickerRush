@@ -6,8 +6,8 @@ import { logger } from "./config/logger.js";
 async function startServer(): Promise<void> {
   try {
     await connectDatabase();
-    const server = app.listen(config.port, () => {
-      logger.info({ port: config.port }, "HTTP server started");
+    const server = app.listen(config.PORT, () => {
+      logger.info({ port: config.PORT }, "HTTP server started");
     });
 
     let isShuttingDown = false;

@@ -11,7 +11,7 @@ mongoose.connection.on("disconnected", () => {
 });
 
 export async function connectDatabase(): Promise<void> {
-  await mongoose.connect(config.mongoUri);
+  await mongoose.connect(config.MONGODB_URI);
   logger.info({ database: mongoose.connection.name }, "Connected to MongoDB");
 }
 

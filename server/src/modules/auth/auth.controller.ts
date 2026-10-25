@@ -1,5 +1,5 @@
 import type { RequestHandler } from "express";
-import { authService } from "./auth.service.js";
+import * as authService from "./auth.service.js";
 import type { RefreshTokenInput, SignInInput, SignUpInput, SignUpResponse } from "./auth.types.js";
 
 export const signUp: RequestHandler<never, SignUpResponse, SignUpInput> = async (req, res) => {

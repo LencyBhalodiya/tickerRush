@@ -3,9 +3,7 @@ import type { ZodType } from "zod";
 
 export function validateBody(schema: ZodType): RequestHandler {
   return (req, _res, next) => {
-    const result = schema.safeParse(req.body);
-    if (!result.success) return next(result.error);
-    req.body = result.data;
+    req.body = schema.parse(req.body);
     next();
   };
 }

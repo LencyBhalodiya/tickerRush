@@ -5,14 +5,14 @@ import { AppError } from "../../common/errors/app-error.js";
 import { USER_ROLES, type AuthTokens, type AuthenticatedUser, type AuthUser, type UserRole } from "./auth.types.js";
 
 const encoder = new TextEncoder();
-const accessSecret = encoder.encode(config.jwt.accessSecret);
-const refreshSecret = encoder.encode(config.jwt.refreshSecret);
+const accessSecret = encoder.encode(config.JWT_ACCESS_SECRET);
+const refreshSecret = encoder.encode(config.JWT_REFRESH_SECRET);
 
 type TokenKind = "access" | "refresh";
 
 async function signToken(user: AuthUser, kind: TokenKind): Promise<string> {
   const secret = kind === "access" ? accessSecret : refreshSecret;
-  const expiration = kind === "access" ? config.jwt.accessTokenTtl : `${config.jwt.refreshTokenTtlDays}d`;
+  const expiration = kind === "access" ? config.JWT_ACCESS_TOKEN_TTL : `${config.JWT_REFRESH_TOKEN_TTL_DAYS}d`;
 
   return new SignJWT({ role: user.role, kind })
     .setProtectedHeader({ alg: "HS256" })

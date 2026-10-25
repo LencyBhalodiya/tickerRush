@@ -9,7 +9,7 @@ import { apiRouter } from "./routes.js";
 const app = express();
 
 app.use(helmet());
-app.use(cors({ origin: config.corsOrigin, credentials: true }));
+app.use(cors({ origin: config.CORS_ORIGIN, credentials: true }));
 app.use(httpLogger);
 app.use(express.json({ limit: "1mb" }));
 
