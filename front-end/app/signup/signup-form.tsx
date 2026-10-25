@@ -1,6 +1,14 @@
 "use client";
 
-import { useRef, useState, type ComponentProps, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import {
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ComponentProps,
+  type CSSProperties,
+  type ReactNode,
+  type SubmitEvent,
+} from "react";
 import { flushSync } from "react-dom";
 import styles from "./signup.module.css";
 
@@ -28,7 +36,7 @@ export function SignupForm() {
     if (first) (form.elements.namedItem(first) as HTMLInputElement).focus();
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     setFormError("");
@@ -72,10 +80,9 @@ export function SignupForm() {
     }
   }
 
-  function handleChange(event: FormEvent<HTMLFormElement>) {
-    const input = event.target as HTMLInputElement;
-    if (input.name === "password") setPasswordLength(input.value.length);
-    const field = input.name as FieldName;
+  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+    const field = event.target.name as FieldName;
+    if (field === "password") setPasswordLength(event.target.value.length);
     if (errors[field]) setErrors(({ [field]: _, ...rest }) => rest);
   }
 
@@ -97,7 +104,7 @@ export function SignupForm() {
               </p>
             </div>
           ) : (
-            <form className={styles.form} noValidate onSubmit={handleSubmit} onChange={handleChange}>
+            <form className={styles.form} noValidate onSubmit={handleSubmit}>
               <header>
                 <p className={styles.kicker}>New member · General admission</p>
                 <h2 className={styles.title}>Create your account</h2>
@@ -113,6 +120,7 @@ export function SignupForm() {
                 label="Full name"
                 name="name"
                 error={errors.name}
+                onChange={handleChange}
                 autoComplete="name"
                 placeholder="Ada Lovelace"
                 required
@@ -123,6 +131,7 @@ export function SignupForm() {
                 name="email"
                 type="email"
                 error={errors.email}
+                onChange={handleChange}
                 autoComplete="email"
                 autoCapitalize="none"
                 spellCheck={false}
@@ -135,6 +144,7 @@ export function SignupForm() {
                 name="password"
                 type={showPassword ? "text" : "password"}
                 error={errors.password}
+                onChange={handleChange}
                 autoComplete="new-password"
                 required
                 minLength={MIN_PASSWORD}
