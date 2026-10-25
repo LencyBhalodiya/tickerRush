@@ -1,0 +1,521 @@
+.page {
+  min-height: 100dvh;
+  max-width: 84rem;
+  margin-inline: auto;
+  padding: clamp(1.5rem, 5vw, 5rem);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 35rem);
+  align-items: center;
+  gap: clamp(2rem, 6vw, 6rem);
+}
+
+/* ---------- Marquee (left column) ---------- */
+
+.marquee > * {
+  animation: rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.marquee > :nth-child(2) { animation-delay: 0.06s; }
+.marquee > :nth-child(3) { animation-delay: 0.12s; }
+.marquee > :nth-child(4) { animation-delay: 0.18s; }
+.marquee > :nth-child(5) { animation-delay: 0.24s; }
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 clamp(2rem, 9vh, 5.5rem);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.5rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Tiny ticket glyph with side notches. */
+.brand::before {
+  content: "";
+  width: 1.7rem;
+  height: 1.15rem;
+  border-radius: 0.2rem;
+  background: var(--accent);
+  mask:
+    radial-gradient(circle at 0 50%, #0000 0.3rem, #000 calc(0.3rem + 0.5px)) left / 51% 100% no-repeat,
+    radial-gradient(circle at 100% 50%, #0000 0.3rem, #000 calc(0.3rem + 0.5px)) right / 51% 100% no-repeat;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0 0 1.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+}
+
+.live {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 2s ease-out infinite;
+}
+
+.headline {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(4.5rem, 10.5vw, 9.5rem);
+  line-height: 0.84;
+  letter-spacing: -0.005em;
+  text-transform: uppercase;
+}
+
+.headline span {
+  display: block;
+  color: var(--accent);
+}
+
+.lede {
+  max-width: 36ch;
+  margin: 1.75rem 0 2rem;
+  font-size: 1.125rem;
+  line-height: 1.6;
+  color: var(--paper-dim);
+}
+
+.perks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.perks li {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid color-mix(in oklab, var(--paper) 22%, transparent);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+}
+
+/* ---------- Ticket ---------- */
+
+/* drop-shadow lives on a wrapper because the ticket's mask would clip a box-shadow. */
+.ticketWrap {
+  filter: drop-shadow(0 2px 2px rgb(0 0 0 / 0.35)) drop-shadow(0 32px 44px rgb(0 0 0 / 0.5));
+  animation: arrive 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 0.15s both;
+}
+
+.ticket {
+  --stub: 6.5rem;
+  --notch: 0.9rem;
+  --cut: calc(100% - var(--stub));
+  color-scheme: light;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--stub);
+  border-radius: 1rem;
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse at 0 0, rgb(255 255 255 / 0.55), transparent 55%),
+    var(--paper);
+  /* Two half-height layers, each punching one semicircle at the perforation line. */
+  mask:
+    radial-gradient(circle at var(--cut) 0, #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) top / 100% 51% no-repeat,
+    radial-gradient(circle at var(--cut) 100%, #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) bottom / 100% 51% no-repeat;
+}
+
+.body {
+  padding: clamp(1.75rem, 4vw, 2.75rem);
+}
+
+.stub {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.75rem 0;
+  border-left: 2px dashed color-mix(in oklab, var(--paper) 85%, transparent);
+  background: var(--accent);
+  color: var(--paper);
+}
+
+.stubTitle {
+  writing-mode: vertical-rl;
+  rotate: 180deg;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 2.5rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.barcode {
+  width: 2.75rem;
+  height: 6rem;
+  background: repeating-linear-gradient(
+    to bottom,
+    currentColor 0 2px,
+    #0000 2px 4px,
+    currentColor 4px 5px,
+    #0000 5px 8px,
+    currentColor 8px 11px,
+    #0000 11px 13px
+  );
+}
+
+.serial {
+  writing-mode: vertical-rl;
+  rotate: 180deg;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.2em;
+}
+
+/* ---------- Form ---------- */
+
+.form {
+  display: grid;
+  gap: 1.35rem;
+}
+
+.kicker {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.title {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(2.4rem, 5vw, 3.1rem);
+  line-height: 0.92;
+  text-transform: uppercase;
+  outline: none;
+}
+
+.formError {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--error);
+  border-radius: 0 0.4rem 0.4rem 0;
+  background: color-mix(in oklab, var(--error) 9%, var(--paper));
+  color: var(--error);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.field label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* Focus = a highlighter swiping across the line, like filling in a paper ticket. */
+.control {
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid var(--ink);
+  background: linear-gradient(color-mix(in oklab, var(--highlight) 55%, transparent) 0 0) left / 0% 100% no-repeat;
+  transition: background-size 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s;
+}
+
+.control:focus-within {
+  background-size: 100% 100%;
+  box-shadow: 0 1px 0 var(--ink);
+}
+
+.field[data-invalid] .control {
+  border-color: var(--error);
+}
+.field[data-invalid] .control:focus-within {
+  box-shadow: 0 1px 0 var(--error);
+}
+
+.control input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0.3rem;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.125rem;
+}
+
+.control input::placeholder {
+  color: color-mix(in oklab, var(--ink) 32%, transparent);
+}
+
+/* Keep autofill from painting the paper blue/yellow. */
+.control input:-webkit-autofill {
+  -webkit-text-fill-color: var(--ink);
+  box-shadow: 0 0 0 100px var(--paper) inset;
+}
+
+.toggle {
+  padding: 0.45rem 0.55rem;
+  border: 0;
+  border-radius: 0.3rem;
+  background: none;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.toggle:hover {
+  color: var(--accent);
+}
+.toggle:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.hint,
+.error {
+  margin: 0.45rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.hint {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--muted);
+}
+
+.error {
+  color: var(--error);
+}
+
+.meter {
+  position: relative;
+  flex: 0 0 4.5rem;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 14%, transparent);
+}
+.meter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  transform-origin: left;
+  transform: scaleX(var(--fill));
+  transition: transform 0.25s ease-out, background-color 0.25s;
+}
+.meter[data-full]::after {
+  background: var(--ok);
+}
+
+.submit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 1rem 1.25rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.4rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.2s, translate 0.1s;
+}
+.submit:hover:not(:disabled) {
+  background: var(--accent);
+}
+.submit:active:not(:disabled) {
+  translate: 0 1px;
+}
+.submit:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.submit:disabled {
+  cursor: progress;
+}
+
+.arrow {
+  transition: translate 0.2s;
+}
+.submit:hover:not(:disabled) .arrow {
+  translate: 0.35rem 0;
+}
+.submit:disabled .arrow {
+  animation: nudge 0.8s ease-in-out infinite;
+}
+
+.fine {
+  margin: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* ---------- Success ---------- */
+
+.success {
+  position: relative;
+  display: grid;
+  align-content: center;
+  min-height: 27rem;
+}
+
+.successText {
+  max-width: 32ch;
+  margin: 0.75rem 0 0;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.stamp {
+  position: absolute;
+  top: 0.5rem;
+  right: 0;
+  padding: 0.15rem 0.9rem;
+  border: 4px solid currentColor;
+  border-radius: 0.5rem;
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 2.1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  rotate: -12deg;
+  mix-blend-mode: multiply;
+  animation: stamp 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) 0.1s both;
+}
+
+/* ---------- Layout breakpoints ---------- */
+
+@media (max-width: 960px) {
+  .page {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    gap: 2.5rem;
+    padding: 1.5rem 1rem 3rem;
+  }
+  .brand {
+    margin-bottom: 2rem;
+  }
+  .headline {
+    font-size: clamp(3.5rem, 15vw, 6rem);
+  }
+  .lede {
+    margin: 1.25rem 0 1.5rem;
+  }
+}
+
+/* Phones: the stub moves to the top and the perforation turns horizontal. */
+@media (max-width: 560px) {
+  .ticket {
+    --stub: 4.25rem;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--stub) auto;
+    mask:
+      radial-gradient(circle at 0 var(--stub), #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) left / 51% 100% no-repeat,
+      radial-gradient(circle at 100% var(--stub), #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) right / 51% 100% no-repeat;
+  }
+  .stub {
+    order: -1;
+    flex-direction: row;
+    padding: 0 1.5rem;
+    border-left: 0;
+    border-bottom: 2px dashed color-mix(in oklab, var(--paper) 85%, transparent);
+  }
+  .stubTitle,
+  .serial {
+    writing-mode: horizontal-tb;
+    rotate: none;
+  }
+  .stubTitle {
+    font-size: 1.75rem;
+  }
+  .barcode {
+    width: 4.5rem;
+    height: 1.6rem;
+    background: repeating-linear-gradient(
+      to right,
+      currentColor 0 2px,
+      #0000 2px 4px,
+      currentColor 4px 5px,
+      #0000 5px 8px,
+      currentColor 8px 11px,
+      #0000 11px 13px
+    );
+  }
+  .body {
+    padding: 1.5rem 1.25rem 1.75rem;
+  }
+}
+
+/* ---------- Motion ---------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    translate: 0 1.25rem;
+  }
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    translate: 0 3rem;
+    rotate: -2.5deg;
+  }
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 70%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 0.6rem #0000;
+  }
+}
+
+@keyframes nudge {
+  50% {
+    translate: 0.4rem 0;
+  }
+}
+
+@keyframes stamp {
+  from {
+    opacity: 0;
+    scale: 2.2;
+  }
+}
