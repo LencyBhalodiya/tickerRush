@@ -12,7 +12,3 @@ export const signUpSchema = z.object({
 
 // No minimum here, so tightening the signup rule never locks out existing passwords.
 export const signInSchema = z.object({ email, password: z.string().min(1).max(128) });
-
-export const refreshTokenSchema = z.object({
-  refreshToken: z.string().min(1),
-});

@@ -157,11 +157,11 @@
   <div class="cover-main">
     <p class="eyebrow">TicketRush · server/</p>
     <h1>Backend<br><span>architecture</span></h1>
-    <p class="cover-lede">How a request moves through the API, how sign-up and sign-in work, and which security controls and rate limits protect each route.</p>
+    <p class="cover-lede">How a request moves through the API, how sign-up, sign-in, refresh and logout work, and which security controls and rate limits protect each route.</p>
     <ul class="chips">
       <li>Express 5</li><li>MongoDB Atlas · Mongoose 9</li><li>TypeScript</li><li>Node 24</li><li>zod · jose · argon2</li>
     </ul>
-    <p class="updated">Last updated 30 Oct 2026 · sign-in added</p>
+    <p class="updated">Last updated 30 Oct 2026 · refresh with rotation and reuse detection, and logout</p>
   </div>
   <nav class="toc">
     <p class="toc-title">Contents</p>
@@ -174,13 +174,14 @@
       <li><a href="#s6"><span>06</span>Rate limits</a></li>
       <li><a href="#s7"><span>07</span>Sign-up flow</a></li>
       <li><a href="#s8"><span>08</span>Sign-in flow</a></li>
-      <li><a href="#s9"><span>09</span>Tokens and protected routes</a></li>
-      <li><a href="#s10"><span>10</span>Error handling</a></li>
-      <li><a href="#s11"><span>11</span>Data model</a></li>
-      <li><a href="#s12"><span>12</span>Startup and shutdown</a></li>
-      <li><a href="#s13"><span>13</span>Security controls</a></li>
-      <li><a href="#s14"><span>14</span>Configuration and testing</a></li>
-      <li><a href="#s15"><span>15</span>Known gaps and next steps</a></li>
+      <li><a href="#s9"><span>09</span>Refresh and logout</a></li>
+      <li><a href="#s10"><span>10</span>Tokens and protected routes</a></li>
+      <li><a href="#s11"><span>11</span>Error handling</a></li>
+      <li><a href="#s12"><span>12</span>Data model</a></li>
+      <li><a href="#s13"><span>13</span>Startup and shutdown</a></li>
+      <li><a href="#s14"><span>14</span>Security controls</a></li>
+      <li><a href="#s15"><span>15</span>Configuration and testing</a></li>
+      <li><a href="#s16"><span>16</span>Known gaps and next steps</a></li>
     </ol>
   </nav>
   <div class="stub" aria-hidden="true"><span>Admit one</span><i></i><b>Nº 000001</b></div>
@@ -300,7 +301,7 @@ flowchart LR
       <tr><td>cors</td><td>Allows only <code>CORS_ORIGIN</code>, with credentials. Answers <code>OPTIONS</code> preflights itself.</td><td>Other sites can't call the API from a user's browser. Preflights never reach a rate limiter.</td></tr>
       <tr><td>pino-http</td><td>Logs method, URL, status and response time; gives handlers <code>req.log</code>.</td><td>Every request is traceable, without logging bodies or secrets.</td></tr>
       <tr><td>express.json</td><td>Parses JSON bodies up to 1 MB.</td><td>Malformed (400) and oversized (413) bodies are rejected before any logic runs.</td></tr>
-      <tr><td>notFound + errorHandler</td><td>Turns unknown routes and every thrown error into JSON.</td><td>The client always gets one consistent error shape (section 10).</td></tr>
+      <tr><td>notFound + errorHandler</td><td>Turns unknown routes and every thrown error into JSON.</td><td>The client always gets one consistent error shape (section 11).</td></tr>
     </tbody>
   </table>
 </section>
@@ -312,23 +313,26 @@ flowchart LR
 <pre class="mermaid">
 flowchart LR
   in(["/api/v1/auth/*"]) --> rl["auth limiter<br>20 / IP / 15 min"]
-  rl -->|"POST /signup"| su["validateBody<br>signUpSchema"]
-  rl -->|"POST /signin"| si["validateBody<br>signInSchema"]
-  rl -->|"POST /refresh"| rf["validateBody<br>refreshTokenSchema"]
-  rl -->|"other path"| nf["404 NOT_FOUND"]
+  rl --> cp["cookieParser"]
+  cp -->|"POST /signup"| su["validateBody<br>signUpSchema"]
+  cp -->|"POST /signin"| si["validateBody<br>signInSchema"]
+  cp -->|"POST /refresh"| rfc["controller<br>refresh"]
+  cp -->|"POST /logout"| loc["controller<br>logout"]
+  cp -->|"other path"| nf["404 NOT_FOUND"]
   su --> suc["controller<br>signUp"]
   si --> sil["sign-in limiters<br>5 / IP+email<br>10 / email<br>failures only"]
   sil --> sic["controller<br>signIn"]
-  rf --> rfc["controller<br>refresh · 501"]
   suc --> svc["auth.service"]
   sic --> svc
+  rfc --> svc
+  loc --> svc
   svc --> db[("MongoDB")]
   classDef err fill:#fdecea,stroke:#dc4527,color:#16130f
   classDef limit fill:#fff1b8,stroke:#c99a00,color:#16130f
-  class nf,rfc err
+  class nf err
   class rl,sil limit
 </pre>
-    <figcaption><span class="sw limit"></span>rate limiters &nbsp; <span class="sw err"></span>error exits / stubs</figcaption>
+    <figcaption><span class="sw limit"></span>rate limiters &nbsp; <span class="sw err"></span>error exits</figcaption>
   </figure>
   <div class="points row" style="margin-top:5mm">
     <h4>Key points</h4>
@@ -336,7 +340,8 @@ flowchart LR
       <li>The auth limiter counts <b>every</b> request under <code>/auth</code>, including invalid bodies and unknown paths.</li>
       <li><code>validateBody</code> parses with zod and replaces <code>req.body</code> with the clean value: trimmed, email lowercased, unknown keys dropped.</li>
       <li>The sign-in limiters run <b>after</b> validation, so <code>A@x.com</code> and <code>a@x.com</code> share one counter.</li>
-      <li>Any step can fail into <code>errorHandler</code>: 429 from a limiter, 422 from validation, 401 / 409 from the service, 501 from the refresh stub.</li>
+      <li><code>cookieParser</code> is mounted on this router only: the <code>refresh_token</code> cookie is scoped to <code>/api/v1/auth</code>, so no other route receives it.</li>
+      <li>Any step can fail into <code>errorHandler</code>: 429 from a limiter, 422 from validation, 401 from the service.</li>
     </ul>
   </div>
 </section>
@@ -344,19 +349,20 @@ flowchart LR
 <!-- ═════════════════════════════ 05 ═════════════════════════════ -->
 <section class="slide" id="s5">
   <header class="sh"><span class="num">05</span><div><h2>Routes and responses</h2><p>Every endpoint, what runs in front of it, and what it can answer.</p></div></header>
-  <table>
+  <table class="dense">
     <thead><tr><th>Route</th><th>Access</th><th>Middleware chain (after global)</th><th>Success</th><th>Errors</th></tr></thead>
     <tbody>
       <tr><td><code>GET /health</code></td><td>public</td><td>none</td><td>200 <code>{status:"ok"}</code></td><td>none</td></tr>
-      <tr><td><code>POST /api/v1/auth/signup</code></td><td>public</td><td>auth limiter → validateBody(signUpSchema) → signUp</td><td>201 <code>{message}</code></td><td>409 EMAIL_ALREADY_EXISTS · 422 · 429</td></tr>
-      <tr><td><code>POST /api/v1/auth/signin</code></td><td>public</td><td>auth limiter → validateBody(signInSchema) → 2 sign-in limiters → signIn</td><td>200 <code>{user, accessToken}</code> + <code>refresh_token</code> cookie</td><td>401 INVALID_CREDENTIALS · 422 · 429</td></tr>
-      <tr><td><code>POST /api/v1/auth/refresh</code> <span class="tag todo">stub</span></td><td>public</td><td>auth limiter → validateBody(refreshTokenSchema) → refresh</td><td>not built yet</td><td>501 NOT_IMPLEMENTED · 422 · 429</td></tr>
+      <tr><td><code>POST /api/v1/auth/signup</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(signUpSchema) → signUp</td><td>202 <code>{message}</code>, same for a new or taken email</td><td>422 · 429</td></tr>
+      <tr><td><code>POST /api/v1/auth/signin</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(signInSchema) → 2 sign-in limiters → signIn</td><td>200 <code>{user, accessToken}</code> + <code>refresh_token</code> cookie</td><td>401 INVALID_CREDENTIALS · 422 · 429</td></tr>
+      <tr><td><code>POST /api/v1/auth/refresh</code></td><td><code>refresh_token</code> cookie</td><td>auth limiter → cookieParser → refresh</td><td>200 <code>{user, accessToken}</code> + new <code>refresh_token</code> cookie</td><td>401 INVALID_REFRESH_TOKEN · 429</td></tr>
+      <tr><td><code>POST /api/v1/auth/logout</code></td><td>public</td><td>auth limiter → cookieParser → logout</td><td>204, cookie cleared, always</td><td>429</td></tr>
     </tbody>
   </table>
   <h3>Response shapes</h3>
   <div class="cards">
     <div>
-      <p class="card-label">200 · sign-in</p>
+      <p class="card-label">200 · sign-in and refresh</p>
 <pre class="json">{
   "user": {
     "id": "6721…", "name": "Ada Lovelace",
@@ -442,18 +448,14 @@ sequenceDiagram
   Note over R,C: auth limiter, then validateBody: trim name,<br>trim + lowercase email, password 12–128 chars
   R->>C: signUp(req)
   C->>S: signUp(body)
-  S->>DB: exists(email)
-  alt email already registered
-    S-->>B: 409 EMAIL_ALREADY_EXISTS
+  Note over S,DB: argon2id hash: 19 MiB, 2 passes, 1 thread<br>(always, even when the email is taken)
+  S->>DB: create AuthAccount, role = "user"
+  alt email already registered (E11000)
+    Note over S,DB: log signup_email_taken, change nothing
   else new email
-    Note over S,DB: argon2id hash: 19 MiB, 2 passes, 1 thread
-    S->>DB: save AuthAccount, role = "user"
-    alt two signups raced (E11000)
-      S-->>B: 409 EMAIL_ALREADY_EXISTS
-    else saved
-      C-->>B: 201 {message}
-    end
+    Note over S,DB: log signup_succeeded
   end
+  C-->>B: 202 {message}, identical either way
 </pre>
     </figure>
     <div class="points">
@@ -462,9 +464,9 @@ sequenceDiagram
         <li>The email is trimmed and lowercased first, so <code>Ada@X.com</code> and <code>ada@x.com</code> are one account.</li>
         <li>zod drops unknown keys: sending <code>"role": "admin"</code> does nothing.</li>
         <li>Passwords are hashed with argon2id at the OWASP minimum cost.</li>
-        <li>The unique index catches two simultaneous sign-ups that both passed the <code>exists</code> check.</li>
-        <li>Logged as <code>signup_succeeded {userId}</code>.</li>
-        <li><span class="tag trade">by choice</span> 409 reveals registered emails until email verification exists.</li>
+        <li>No <code>exists</code> pre-check: the unique email index decides, which also covers two sign-ups racing.</li>
+        <li>A taken email gets the same 202 after the same work (one hash, one insert), so neither the reply nor its timing reveals who is registered.</li>
+        <li><span class="tag trade">trade-off</span> The real owner isn't told, and someone who forgot they registered gets a 401 if they chose a new password.</li>
       </ul>
     </div>
   </div>
@@ -516,17 +518,67 @@ sequenceDiagram
 
 <!-- ═════════════════════════════ 09 ═════════════════════════════ -->
 <section class="slide" id="s9">
-  <header class="sh"><span class="num">09</span><div><h2>Tokens and protected routes</h2><p>Two tokens with different jobs, and the check that guards private routes.</p></div></header>
-  <table>
+  <header class="sh"><span class="num">09</span><div><h2>Refresh and logout</h2><p><code>POST /api/v1/auth/refresh</code> and <code>/logout</code>: both read only the <code>refresh_token</code> cookie.</p></div></header>
+  <div class="cols seq">
+    <figure data-max-h="152">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant S as Service
+  participant DB as MongoDB
+  B->>S: POST /refresh · Cookie refresh_token
+  Note over S: verify JWT: HS256, refresh secret,<br>kind = refresh, not expired
+  S->>DB: findOneAndUpdate(hash, revokedAt null,<br>not expired) → set revokedAt
+  alt claimed (normal case)
+    DB-->>S: record
+  else not claimed
+    S->>DB: findOne(hash)
+    alt revoked under 10 s ago
+      Note over S,DB: two tabs or a retry: carry on
+    else revoked earlier: a copy is in use
+      S->>DB: deleteMany(userId, refresh)
+      S-->>B: 401 · every session ended
+    else unknown, expired or logged out
+      S-->>B: 401 INVALID_REFRESH_TOKEN
+    end
+  end
+  S->>DB: findById(userId): fresh name, role
+  Note over S,DB: new pair with the same auth_time<br>refresh exp = min(now + 7 d, auth_time + 30 d)
+  S->>DB: save sha256(new refresh token)
+  S-->>B: 200 {user, accessToken} + new cookie
+</pre>
+    </figure>
+    <div class="points">
+      <h4>Refresh</h4>
+      <ul>
+        <li><b>Rotation:</b> every refresh revokes the old token and issues a new one. The atomic update means two requests with one token can't both claim it.</li>
+        <li><b>Reuse detection:</b> only rotation sets <code>revokedAt</code>, so a revoked token coming back means someone kept a copy. Logged as <code>refresh_token_reused</code>.</li>
+        <li><b>10-second grace:</b> covers two tabs loading at once, like Okta's grace period and Auth0's reuse interval.</li>
+        <li><b>Session cap:</b> ends after 7 idle days, or 30 days after sign-in at most.</li>
+      </ul>
+      <h4 style="margin-top:4mm">Logout</h4>
+      <ul>
+        <li>Deletes this device's record (not revoke, so it never looks like reuse), clears the cookie with the same options, always 204.</li>
+        <li>No access token needed: it may already have expired.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 10 ═════════════════════════════ -->
+<section class="slide" id="s10">
+  <header class="sh"><span class="num">10</span><div><h2>Tokens and protected routes</h2><p>Two tokens with different jobs, and the check that guards private routes.</p></div></header>
+  <table class="dense">
     <thead><tr><th style="width:30mm"></th><th>Access token</th><th>Refresh token</th></tr></thead>
     <tbody>
       <tr><td>Format</td><td>JWT, HS256, signed with <code>JWT_ACCESS_SECRET</code></td><td>JWT, HS256, signed with <code>JWT_REFRESH_SECRET</code></td></tr>
-      <tr><td>Claims</td><td><code>sub</code> (user id), <code>role</code>, <code>kind: "access"</code>, <code>jti</code>, <code>iat</code>, <code>exp</code></td><td>same, with <code>kind: "refresh"</code></td></tr>
-      <tr><td>Lifetime</td><td>15 minutes (<code>JWT_ACCESS_TOKEN_TTL</code>)</td><td>7 days (<code>JWT_REFRESH_TOKEN_TTL_DAYS</code>)</td></tr>
+      <tr><td>Claims</td><td><code>sub</code> (user id), <code>role</code>, <code>kind: "access"</code>, <code>auth_time</code> (sign-in time), <code>jti</code>, <code>iat</code>, <code>exp</code></td><td>same, with <code>kind: "refresh"</code></td></tr>
+      <tr><td>Lifetime</td><td>15 minutes (<code>JWT_ACCESS_TOKEN_TTL</code>)</td><td>7 days from the last refresh (<code>JWT_REFRESH_TOKEN_TTL_DAYS</code>), 30 days after sign-in at most</td></tr>
       <tr><td>Client keeps it</td><td>in memory (React state), never localStorage</td><td>cookie <code>refresh_token</code>: HttpOnly, Secure, SameSite=Strict, Path=/api/v1/auth</td></tr>
       <tr><td>Sent as</td><td><code>Authorization: Bearer &lt;token&gt;</code></td><td>automatically by the browser, only to <code>/api/v1/auth/*</code></td></tr>
       <tr><td>Server stores</td><td>nothing (stateless)</td><td>sha256 hash in <code>authtokens</code>; a TTL index deletes it after expiry</td></tr>
-      <tr><td>Revocable</td><td>no; it expires within 15 minutes</td><td>yes, via <code>revokedAt</code> or deletion (once refresh and logout exist)</td></tr>
+      <tr><td>Revocable</td><td>no; it stays valid until it expires, even after logout</td><td>yes: revoked on rotation, deleted on logout or reuse</td></tr>
     </tbody>
   </table>
   <h3>Protected routes <span class="tag todo">built, not mounted yet</span></h3>
@@ -548,9 +600,9 @@ flowchart LR
   </figure>
 </section>
 
-<!-- ═════════════════════════════ 10 ═════════════════════════════ -->
-<section class="slide" id="s10">
-  <header class="sh"><span class="num">10</span><div><h2>Error handling</h2><p>One place turns every failure into the same JSON shape.</p></div></header>
+<!-- ═════════════════════════════ 11 ═════════════════════════════ -->
+<section class="slide" id="s11">
+  <header class="sh"><span class="num">11</span><div><h2>Error handling</h2><p>One place turns every failure into the same JSON shape.</p></div></header>
   <div class="cols half">
     <div class="stack">
       <p class="intro">Services fail by throwing <code>new AppError(status, message, CODE)</code>. Every error, from any layer, ends in <code>errorHandler</code>. 4xx errors are logged at <code>warn</code>, 500s at <code>error</code> with the stack.</p>
@@ -573,23 +625,22 @@ flowchart TB
       <thead><tr><th>Code</th><th>Status</th><th>Raised by</th></tr></thead>
       <tbody>
         <tr><td>VALIDATION_ERROR</td><td>422</td><td><code>validateBody</code> (zod)</td></tr>
-        <tr><td>EMAIL_ALREADY_EXISTS</td><td>409</td><td><code>signUp</code>: pre-check or unique-index race</td></tr>
         <tr><td>INVALID_CREDENTIALS</td><td>401</td><td><code>signIn</code>: unknown email or wrong password</td></tr>
         <tr><td>RATE_LIMITED</td><td>429</td><td>any limiter in <code>auth.routes.ts</code></td></tr>
         <tr><td>UNAUTHENTICATED</td><td>401</td><td><code>requireAuth</code>: no Bearer header</td></tr>
         <tr><td>INVALID_ACCESS_TOKEN</td><td>401</td><td><code>verifyAccessToken</code></td></tr>
         <tr><td>FORBIDDEN</td><td>403</td><td><code>requireRole</code></td></tr>
         <tr><td>NOT_FOUND</td><td>404</td><td><code>notFoundHandler</code></td></tr>
-        <tr><td>NOT_IMPLEMENTED</td><td>501</td><td><code>refresh</code> stub</td></tr>
+        <tr><td>INVALID_REFRESH_TOKEN</td><td>401</td><td><code>refresh</code>: cookie missing, invalid, expired, logged out or reused</td></tr>
         <tr><td>INTERNAL_SERVER_ERROR</td><td>500</td><td>anything unexpected</td></tr>
       </tbody>
     </table>
   </div>
 </section>
 
-<!-- ═════════════════════════════ 11 ═════════════════════════════ -->
-<section class="slide" id="s11">
-  <header class="sh"><span class="num">11</span><div><h2>Data model</h2><p>Two collections: accounts, and the tokens issued to them.</p></div></header>
+<!-- ═════════════════════════════ 12 ═════════════════════════════ -->
+<section class="slide" id="s12">
+  <header class="sh"><span class="num">12</span><div><h2>Data model</h2><p>Two collections: accounts, and the tokens issued to them.</p></div></header>
   <div class="cols">
     <figure data-max-h="148">
 <pre class="mermaid">
@@ -610,7 +661,7 @@ erDiagram
     ObjectId userId FK "AuthAccount"
     string type "refresh, password_reset, email_verification"
     date expiresAt "TTL index"
-    date revokedAt "null while active"
+    date revokedAt "set only by rotation"
     string userAgent "max 512"
     string ipAddress "max 45"
   }
@@ -621,7 +672,7 @@ erDiagram
       <ul>
         <li><code>authaccounts.email</code> unique: one account per email; catches sign-up races.</li>
         <li><code>authtokens.tokenHash</code> unique: finds a presented token in one lookup.</li>
-        <li><code>authtokens {userId, type}</code>: per-user operations like "log out everywhere"; also serves <code>userId</code>-only queries.</li>
+        <li><code>authtokens {userId, type}</code>: reuse detection deletes every refresh token of one user; also serves <code>userId</code>-only queries.</li>
         <li><code>authtokens.expiresAt</code> TTL: MongoDB deletes expired tokens itself (about once a minute).</li>
         <li><code>select: false</code> hides <code>passwordHash</code> and <code>tokenHash</code> unless a query asks for them.</li>
       </ul>
@@ -629,9 +680,9 @@ erDiagram
   </div>
 </section>
 
-<!-- ═════════════════════════════ 12 ═════════════════════════════ -->
-<section class="slide" id="s12">
-  <header class="sh"><span class="num">12</span><div><h2>Startup and shutdown</h2><p>How the process comes up, and how it goes down cleanly (<code>server.ts</code>).</p></div></header>
+<!-- ═════════════════════════════ 13 ═════════════════════════════ -->
+<section class="slide" id="s13">
+  <header class="sh"><span class="num">13</span><div><h2>Startup and shutdown</h2><p>How the process comes up, and how it goes down cleanly (<code>server.ts</code>).</p></div></header>
   <figure data-max-h="92">
 <pre class="mermaid">
 flowchart TB
@@ -664,16 +715,17 @@ flowchart TB
   </div>
 </section>
 
-<!-- ═════════════════════════════ 13 ═════════════════════════════ -->
-<section class="slide" id="s13">
-  <header class="sh"><span class="num">13</span><div><h2>Security controls</h2><p>Each threat, what stops it, and where that lives in the code.</p></div></header>
+<!-- ═════════════════════════════ 14 ═════════════════════════════ -->
+<section class="slide" id="s14">
+  <header class="sh"><span class="num">14</span><div><h2>Security controls</h2><p>Each threat, what stops it, and where that lives in the code.</p></div></header>
   <table class="dense">
     <thead><tr><th style="width:52mm">Threat</th><th>Control</th><th style="width:62mm">Where</th></tr></thead>
     <tbody>
       <tr><td>Stolen database → passwords</td><td>argon2id, 19 MiB memory, 2 passes, 1 thread (OWASP minimum). Hash not selected by default.</td><td><code>auth.service.ts</code>, <code>auth.model.ts</code></td></tr>
       <tr><td>Stolen database → sessions</td><td>Only sha256 hashes of refresh tokens are stored.</td><td><code>auth.tokens.ts</code> · hashToken</td></tr>
       <tr><td>Password guessing</td><td>Three layered rate limits (section 06).</td><td><code>auth.routes.ts</code></td></tr>
-      <tr><td>Email enumeration at sign-in</td><td>Identical 401 body, plus a dummy argon2 verify so timing matches.</td><td><code>auth.service.ts</code> · signIn</td></tr>
+      <tr><td>Email enumeration</td><td>Sign-in: identical 401, plus a dummy argon2 verify so timing matches. Sign-up: identical 202, always one hash and one insert, no pre-check.</td><td><code>auth.service.ts</code> · signIn, signUp</td></tr>
+      <tr><td>Stolen refresh token</td><td>Rotated on every use. A rotated token coming back (after a 10-second grace) deletes every refresh token of that user. Sessions end 30 days after sign-in regardless.</td><td><code>auth.service.ts</code> · refresh</td></tr>
       <tr><td>XSS stealing tokens</td><td>Refresh token is HttpOnly. Access token lives only in memory and expires in 15 minutes.</td><td><code>auth.controller.ts</code>, front-end <code>session.tsx</code></td></tr>
       <tr><td>CSRF and login CSRF</td><td>SameSite=Strict cookie scoped to <code>/api/v1/auth</code>. JSON-only bodies force a CORS preflight that only <code>CORS_ORIGIN</code> passes.</td><td><code>app.ts</code>, <code>auth.controller.ts</code></td></tr>
       <tr><td>Forged or confused JWTs</td><td>HS256 pinned on verify, a separate secret per token kind, <code>kind</code> and role checked.</td><td><code>auth.tokens.ts</code></td></tr>
@@ -688,9 +740,9 @@ flowchart TB
   </table>
 </section>
 
-<!-- ═════════════════════════════ 14 ═════════════════════════════ -->
-<section class="slide" id="s14">
-  <header class="sh"><span class="num">14</span><div><h2>Configuration and testing</h2><p>Every setting the server reads, and how its behaviour is checked.</p></div></header>
+<!-- ═════════════════════════════ 15 ═════════════════════════════ -->
+<section class="slide" id="s15">
+  <header class="sh"><span class="num">15</span><div><h2>Configuration and testing</h2><p>Every setting the server reads, and how its behaviour is checked.</p></div></header>
   <div class="cols env">
     <div class="stack">
       <p class="intro">Loaded with Node's built-in <code>--env-file=.env</code> and validated by zod in <code>config/env.ts</code>. Code reads <code>config.X</code>, never <code>process.env</code>. A new variable goes in the schema and in <code>.env.example</code>.</p>
@@ -717,26 +769,29 @@ flowchart TB
       </ul>
       <h4 style="margin-top:5mm">Covered today</h4>
       <ul>
-        <li>Sign-in returns the access token and the cookie with every flag; only the hash is stored.</li>
-        <li>Wrong password and unknown email get identical 401 bodies.</li>
-        <li>The 6th failed attempt for one email from one IP gets 429.</li>
+        <li>Sign-in: token, cookie flags, hash-only storage, identical 401s, 429 on the 6th failure.</li>
+        <li>Sign-up: a taken email looks identical to a new one.</li>
+        <li>Refresh: rotation, grace window, reuse ends every session, 30-day cap.</li>
+        <li>Logout: 204 with or without a cookie; the token stops working.</li>
       </ul>
     </div>
   </div>
 </section>
 
-<!-- ═════════════════════════════ 15 ═════════════════════════════ -->
-<section class="slide" id="s15">
-  <header class="sh"><span class="num">15</span><div><h2>Known gaps and next steps</h2><p>What isn't safe or finished yet, and the plan for each.</p></div></header>
-  <table>
+<!-- ═════════════════════════════ 16 ═════════════════════════════ -->
+<section class="slide" id="s16">
+  <header class="sh"><span class="num">16</span><div><h2>Known gaps and next steps</h2><p>What isn't safe or finished yet, and the plan for each.</p></div></header>
+  <table class="dense">
     <thead><tr><th style="width:62mm">Gap</th><th>Risk today</th><th>Plan</th></tr></thead>
     <tbody>
-      <tr><td><code>/refresh</code> and logout <span class="tag todo">next</span></td><td>Sessions can't be renewed or revoked; a page reload signs the user out.</td><td>Read the cookie, rotate the token on every use, detect reuse, add <code>/logout</code>. The body-based <code>refreshTokenSchema</code> goes away.</td></tr>
       <tr><td>JWT secrets only need 15 chars</td><td>A short HS256 secret can be brute-forced offline from any token.</td><td>Raise the zod minimum to 32, as <code>.env.example</code> already says.</td></tr>
       <tr><td>Rate limits in memory</td><td>Fine for one process; each extra instance multiplies the real limit.</td><td>Move to a Redis store when running more than one instance.</td></tr>
       <tr><td><code>trust proxy</code> not set</td><td>Behind Nginx or a load balancer every client shares the proxy's IP, so one user can rate-limit everyone.</td><td>Set it to the proxy hop count at deploy time.</td></tr>
-      <tr><td>Sign-up reveals emails <span class="tag trade">by choice</span></td><td>409 on sign-up confirms an account exists (sign-in doesn't).</td><td>Revisit once email verification exists.</td></tr>
+      <tr><td>Taken email at sign-up <span class="tag trade">trade-off</span></td><td>Looks like success: the real owner isn't told, and someone who forgot they registered gets a 401 if they chose a new password.</td><td>Email the owner instead, once email sending exists.</td></tr>
       <tr><td>No email verification or reset</td><td>Anyone can sign up with someone else's email.</td><td>Use the <code>email_verification</code> / <code>password_reset</code> token types already in <code>AuthTokenModel</code>.</td></tr>
+      <tr><td>Access token after logout <span class="tag trade">trade-off</span></td><td>Stays valid for up to 15 minutes after logout or reuse detection.</td><td>Keep it short-lived. Add a <code>jti</code> denylist only if a route needs instant revocation.</td></tr>
+      <tr><td>Lost refresh response <span class="tag trade">trade-off</span></td><td>If the new cookie never arrives and the browser retries after the 10-second grace, reuse detection signs the user out everywhere.</td><td>Accepted: safer than letting an old token work indefinitely.</td></tr>
+      <tr><td>Refresh shares the auth limiter <span class="tag trade">trade-off</span></td><td>Every full page load spends 1 of the 20 requests per 15 minutes.</td><td>Give <code>/refresh</code> its own, higher limit if users hit 429.</td></tr>
       <tr><td>Per-email lockout <span class="tag trade">trade-off</span></td><td>An attacker can block a user's sign-in for up to 15 minutes.</td><td>Accepted for now; revisit with CAPTCHA or progressive delays.</td></tr>
     </tbody>
   </table>

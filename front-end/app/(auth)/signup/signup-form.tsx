@@ -39,9 +39,7 @@ export function SignupForm() {
         return;
       }
 
-      if (res.status === 409) {
-        showErrors(form, { email: data.message });
-      } else if (res.status === 422 && data.errors?.fieldErrors) {
+      if (res.status === 422 && data.errors?.fieldErrors) {
         showErrors(form, serverFieldErrors(data.errors.fieldErrors));
       } else {
         setFormError(data.message ?? "Something went wrong. Please try again.");

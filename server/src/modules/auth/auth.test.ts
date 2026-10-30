@@ -11,6 +11,7 @@ import { AuthAccountModel } from "./auth.model.js";
 import { hashToken } from "./auth.tokens.js";
 
 const email = `signin-test-${Date.now()}@example.com`;
+const freshEmail = `signup-test-${Date.now()}@example.com`;
 const password = "correct horse battery";
 let server: Server;
 let baseUrl: string;
@@ -31,15 +32,13 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v1/auth`;
 
   const res = await post("/signup", { name: "Sign-in Test", email, password });
-  assert.equal(res.status, 201);
+  assert.equal(res.status, 202);
 });
 
 after(async () => {
-  const account = await AuthAccountModel.findOne({ email });
-  if (account) {
-    await AuthTokenModel.deleteMany({ userId: account._id });
-    await account.deleteOne();
-  }
+  const ids = (await AuthAccountModel.find({ email: { $in: [email, freshEmail] } })).map((account) => account._id);
+  await AuthTokenModel.deleteMany({ userId: { $in: ids } });
+  await AuthAccountModel.deleteMany({ _id: { $in: ids } });
   server.closeAllConnections();
   server.close();
   await mongoose.disconnect();
@@ -73,6 +72,19 @@ test("wrong password and unknown email get the identical 401", async () => {
   assert.equal(wrongPassword.status, 401);
   assert.equal(unknownEmail.status, 401);
   assert.deepEqual(await wrongPassword.json(), await unknownEmail.json());
+});
+
+test("signing up with a registered email looks exactly like a new sign-up", async () => {
+  const fresh = await post("/signup", { name: "New Person", email: freshEmail, password });
+  const taken = await post("/signup", { name: "Impostor", email: email.toUpperCase(), password: "a different password" });
+
+  assert.equal(taken.status, fresh.status);
+  assert.deepEqual(await taken.json(), await fresh.json());
+
+  // The original account kept its name and password.
+  const signIn = await post("/signin", { email, password });
+  assert.equal(signIn.status, 200);
+  assert.equal((await signIn.json()).user.name, "Sign-in Test");
 });
 
 test("the 6th failed attempt for one email from one IP is rate limited", async () => {
