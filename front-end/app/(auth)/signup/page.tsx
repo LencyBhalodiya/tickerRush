@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { SignupForm } from "./signup-form";
-import styles from "./signup.module.css";
+import styles from "../auth.module.css";
 
 export const metadata: Metadata = { title: "Sign up" };
 

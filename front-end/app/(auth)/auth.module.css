@@ -347,6 +347,7 @@
   font-size: 1.4rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  text-decoration: none;
   cursor: pointer;
   transition: background-color 0.2s, translate 0.1s;
 }
@@ -382,6 +383,22 @@
   color: var(--muted);
 }
 
+.fine a {
+  color: var(--ink);
+  font-weight: 500;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.25em;
+}
+.fine a:hover {
+  color: var(--accent);
+}
+.fine a:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* ---------- Success ---------- */
 
 .success {
@@ -396,6 +413,32 @@
   margin: 0.75rem 0 0;
   line-height: 1.6;
   color: var(--ink-soft);
+}
+
+.success .submit {
+  margin-top: 1.75rem;
+}
+
+.details {
+  display: grid;
+  gap: 1rem;
+  margin: 1.25rem 0 0;
+  padding-top: 1.25rem;
+  border-top: 2px dashed color-mix(in oklab, var(--ink) 25%, transparent);
+}
+
+.details dt {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.details dd {
+  margin: 0.2rem 0 0;
+  font-size: 1.125rem;
+  overflow-wrap: anywhere;
 }
 
 .stamp {

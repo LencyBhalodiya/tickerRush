@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-tickerRush is a project for practicing system design ideas (message queues, Redis, etc.). It has two packages: `server/`, an Express 5 + MongoDB (Mongoose) API in TypeScript, and `front-end/`, a Next.js (App Router) client that so far only has the signup page.
+tickerRush is a project for practicing system design ideas (message queues, Redis, etc.). It has two packages: `server/`, an Express 5 + MongoDB (Mongoose) API in TypeScript, and `front-end/`, a Next.js (App Router) client with signup, sign-in and account pages.
 
 ## Commands
 
@@ -17,15 +17,24 @@ npm run dev            # tsx watch mode on src/server.ts
 npm run build          # tsc -> dist/
 npm start              # run dist/server.js
 npx tsc --noEmit       # typecheck only
+npm test               # node:test over src/**/*.test.ts, with NODE_ENV=test (logging off)
+npm run docs:pdf       # docs/architecture.html → docs/architecture.pdf (needs Google Chrome, plus network access for Mermaid and Google Fonts)
 ```
 
-There is no test runner and no linter yet. `npm test` is the default placeholder and always fails.
+**Keep the architecture doc current.** `server/docs/architecture.pdf` is committed, and its source is `server/docs/architecture.html` (Mermaid diagrams plus tables). Any change to server routes, middleware, rate limits, security controls, tokens, models, error codes or env variables must update the HTML in the same change. That includes the "Last updated" line and the "Known gaps" table. Then run `npm run docs:pdf` and commit both files. The doc covers the back-end only.
+
+Tests use Node's built-in `node:test` and `fetch` against `app.listen(0)`, with no supertest. They connect to the same `MONGODB_URI` but override `dbName` to `ticker-rush-test`, and each test removes the accounts it creates. There is no local MongoDB, so `npm test` needs network access to Atlas. There is no linter yet.
 
 ### front-end
 
 Run from `front-end/`. `npm run dev` serves on port 5173, the origin the server's `CORS_ORIGIN` allows, and `npm run build` also typechecks. The API base URL comes from `NEXT_PUBLIC_API_URL` (copy `.env.example` to `.env.local`) and falls back to `http://localhost:3000`.
 
-Styling is plain CSS Modules, with the color tokens in `app/globals.css`, fonts loaded through `next/font`, and no UI library. The signup form copies the server's zod limits into native input constraints (`required`, `minLength`, …), shows those messages inline, and maps 409/422 responses back onto the fields.
+Styling is plain CSS Modules, with the color tokens in `app/globals.css`, fonts loaded through `next/font`, and no UI library.
+
+- The `app/(auth)/` route group holds `/signup`, `/signin` and `/account`. They share `auth.module.css` and `ticket-form.tsx`, which provides the `Ticket` shell, `Field`, `useFieldErrors`, `nativeErrors` and `serverFieldErrors`.
+- The forms copy the server's zod limits into native input constraints (`required`, `minLength`, …) and show those messages inline. 409 and 422 responses are mapped back onto the fields. The deliberately vague 401 from sign-in goes in the form banner.
+- All API calls go through `postJson` in `app/api.ts`, which sends `credentials: "include"`. Without that, the browser won't store the cross-origin `refresh_token` cookie.
+- `SessionProvider` (`app/session.tsx`, mounted in the root layout) keeps `{ user, accessToken }` in React state only, never in localStorage. Reloading the page signs you out until the server's `/refresh` endpoint exists.
 
 ## Architecture
 
@@ -51,12 +60,14 @@ Follow the `auth` module's pattern:
 
 ### Auth specifics
 
-- All `/auth` routes share one rate limiter, which counts per IP in memory.
+- All `/auth` routes share one rate limiter: 20 requests per IP per 15 minutes, counted in memory. `/signin` also has two limiters that count only failed attempts: 5 per (IP + email) and 10 per email. Both run after validation, so the email is already normalised.
+- `signIn` returns the same `401 INVALID_CREDENTIALS` for an unknown email and for a wrong password. For an unknown email it still checks against a dummy argon2 hash, so both cases take the same time. It returns `{ user, accessToken }` with `Cache-Control: no-store`. The refresh token is set only as a `refresh_token` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/api/v1/auth`), and its sha256 hash is stored in `AuthTokenModel`.
 - Passwords are hashed with argon2id. Fields that hold secrets (`passwordHash`, `tokenHash`) use `select: false`.
 - Access and refresh tokens are HS256 JWTs signed with `jose`, using separate secrets. Each carries a `kind` claim that verification checks.
 - Refresh, password-reset and email-verification tokens are supposed to be stored as sha256 hashes in `AuthTokenModel`, which has a TTL index on `expiresAt`.
 - `requireAuth` puts `{ id, role }` on `req.auth`. `requireRole(...roles)` must be mounted after it.
-- `signIn` and `refresh` are still stubs that return 501.
+- `refresh` is still a stub that returns 501. When it is built, it should read the `refresh_token` cookie, not the body.
+- The server compiles to CommonJS (`package.json` has no `"type": "module"`), so top-level `await` is not available.
 
 ## Conventions
 

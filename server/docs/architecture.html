@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TicketRush API · Backend Architecture</title>
+<!--
+  Source of server/docs/architecture.pdf. Edit this file, then run `npm run docs:pdf` from server/.
+  Diagrams are Mermaid (https://mermaid.js.org) and re-layout themselves when edited.
+  Each <section class="slide"> starts a new landscape page. A figure's data-max-h (mm) caps the diagram height.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders:wght@700;800&family=Instrument+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=block" rel="stylesheet">
+<style>
+  @page {
+    size: A4 landscape;
+    margin: 12mm 14mm 13mm;
+    @bottom-left { content: "TicketRush · Backend architecture"; font: 500 7.5pt "DM Mono", monospace; color: #8a7f70; }
+    @bottom-right { content: counter(page) " / " counter(pages); font: 500 7.5pt "DM Mono", monospace; color: #8a7f70; }
+  }
+  @page :first {
+    @bottom-left { content: none; }
+    @bottom-right { content: none; }
+  }
+
+  :root {
+    --ink: #16130f; --ink-soft: #3d362d; --muted: #6b6152; --line: #e2d9ca;
+    --paper: #f4ecdc; --paper-soft: #faf6ee; --accent: #dc4527; --err-bg: #fdecea;
+    --limit-bg: #fff1b8; --ok: #2e7d4f; --ok-bg: #e3f1e8; --code-bg: #f1ebdf;
+    --display: "Big Shoulders", "Arial Narrow", sans-serif;
+    --body: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "DM Mono", "DejaVu Sans Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; background: #fff; color: var(--ink); font: 400 11pt/1.5 var(--body); }
+  /* Matches the printable width (297mm − 2 × 14mm) so diagrams are measured at their printed size. */
+  main { width: 269mm; }
+
+  /* In a browser, show each page as an A4 sheet. The padding equals the @page margins,
+     so the content width (and therefore every diagram's size) is the same as in the PDF. */
+  @media screen {
+    body { padding: 10mm 0; background: #d8d0c2; counter-reset: sheet; }
+    main { width: auto; }
+    .sheet, .slide {
+      position: relative;
+      width: 297mm;
+      min-height: 210mm;
+      margin: 0 auto 10mm;
+      padding: 12mm 14mm 13mm;
+      border-radius: 1.5mm;
+      background: #fff;
+      box-shadow: 0 1mm 2mm rgb(0 0 0 / .08), 0 6mm 18mm rgb(0 0 0 / .16);
+      counter-increment: sheet;
+    }
+    .slide::before, .slide::after { position: absolute; bottom: 5mm; font: 500 7.5pt var(--mono); color: #8a7f70; }
+    .slide::before { content: "TicketRush · Backend architecture"; left: 14mm; }
+    .slide::after { content: counter(sheet); right: 14mm; }
+  }
+
+  /* ── Cover ─────────────────────────────────────────── */
+  .cover {
+    height: 184mm;
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 24mm;
+    border-radius: 5mm;
+    overflow: hidden;
+    color: var(--paper);
+    background: radial-gradient(ellipse 75% 65% at 8% -12%, #4a301b, transparent 70%), var(--ink);
+  }
+  .cover-main { display: flex; flex-direction: column; padding: 17mm 12mm 13mm 16mm; }
+  .eyebrow { margin: 0 0 9mm; font: 500 8.5pt var(--mono); letter-spacing: .22em; text-transform: uppercase; color: var(--accent); }
+  .cover h1 { margin: 0; font: 800 58pt/.88 var(--display); text-transform: uppercase; letter-spacing: .005em; }
+  .cover h1 span { color: var(--accent); }
+  .cover-lede { margin: 8mm 0 0; max-width: 118mm; font-size: 13pt; line-height: 1.55; color: #d4c9b7; }
+  .chips { display: flex; flex-wrap: wrap; gap: 2mm; margin: auto 0 0; padding: 0; list-style: none; }
+  .chips li { padding: 1.2mm 3.2mm; border: 1px solid rgb(244 236 220 / .28); border-radius: 10mm; font: 500 8pt var(--mono); letter-spacing: .1em; text-transform: uppercase; color: #d4c9b7; }
+  .updated { margin: 5mm 0 0; font: 400 8.5pt var(--mono); color: #a39886; }
+  .toc { padding: 17mm 10mm 13mm 4mm; }
+  .toc-title { margin: 0 0 4mm; font: 500 8.5pt var(--mono); letter-spacing: .22em; text-transform: uppercase; color: #a39886; }
+  .toc ol { margin: 0; padding: 0; list-style: none; }
+  .toc a { display: flex; gap: 4mm; padding: 1.55mm 0; border-bottom: 1px solid rgb(244 236 220 / .12); color: var(--paper); text-decoration: none; font-size: 11pt; }
+  .toc a span { width: 7mm; font: 500 9pt/1.7 var(--mono); color: var(--accent); }
+  .stub { display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 12mm 0; border-left: 2px dashed rgb(244 236 220 / .7); background: var(--accent); color: var(--paper); }
+  .stub span { writing-mode: vertical-rl; rotate: 180deg; font: 800 26pt/1 var(--display); letter-spacing: .04em; text-transform: uppercase; }
+  .stub i { width: 10mm; height: 32mm; background: repeating-linear-gradient(to bottom, currentColor 0 2px, #0000 2px 4px, currentColor 4px 5px, #0000 5px 8px, currentColor 8px 11px, #0000 11px 13px); }
+  .stub b { writing-mode: vertical-rl; rotate: 180deg; font: 500 8pt var(--mono); letter-spacing: .2em; }
+
+  /* ── Slides ────────────────────────────────────────── */
+  .slide { break-before: page; }
+  .sh { display: flex; align-items: flex-end; gap: 5mm; margin-bottom: 5mm; padding-bottom: 3mm; border-bottom: 2px solid var(--ink); }
+  .sh .num { font: 800 36pt/.8 var(--display); color: var(--accent); }
+  .sh h2 { margin: 0; font: 800 25pt/.95 var(--display); text-transform: uppercase; letter-spacing: .01em; }
+  .sh p { margin: 1.4mm 0 0; font-size: 11pt; color: var(--muted); }
+  h3 { margin: 5mm 0 2.5mm; font: 800 14pt/1 var(--display); text-transform: uppercase; letter-spacing: .02em; break-after: avoid; }
+  p { margin: 0 0 3mm; }
+  .intro { max-width: 200mm; color: var(--ink-soft); }
+
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 88mm; gap: 7mm; align-items: start; }
+  .cols.layout { grid-template-columns: minmax(0, 1fr) 104mm; }
+  .cols.seq { grid-template-columns: minmax(0, 1fr) 74mm; }
+  .cols.half { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .cols.env { grid-template-columns: minmax(0, 1fr) 82mm; }
+  .stack > * + * { margin-top: 5mm; }
+
+  .points { padding: 4.5mm 5.5mm; border-left: 3px solid var(--accent); border-radius: 0 3mm 3mm 0; background: var(--paper-soft); break-inside: avoid; }
+  .points h4 { margin: 0 0 3mm; font: 500 8pt var(--mono); letter-spacing: .18em; text-transform: uppercase; color: var(--accent); }
+  .points ul { margin: 0; padding-left: 4.5mm; }
+  .points li { margin-bottom: 2.2mm; font-size: 10.5pt; line-height: 1.45; }
+  .points li:last-child { margin-bottom: 0; }
+  .points.row ul { columns: 2; column-gap: 9mm; }
+  .points.row li { break-inside: avoid; }
+  .points p { font-size: 10.5pt; }
+
+  figure { margin: 0; padding: 4mm; border: 1px solid var(--line); border-radius: 3mm; background: #fff; break-inside: avoid; }
+  figcaption { margin-top: 3mm; font-size: 9.5pt; line-height: 1.45; color: var(--muted); }
+  .mermaid { display: flex; justify-content: center; margin: 0; padding: 0; background: none; }
+  .mermaid svg { display: block; }
+  .sw { display: inline-block; width: 3.2mm; height: 3.2mm; margin: 0 1mm -.4mm 0; border: 1px solid; border-radius: .6mm; }
+  .sw.limit { background: var(--limit-bg); border-color: #c99a00; }
+  .sw.err { background: var(--err-bg); border-color: var(--accent); }
+
+  table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 3mm; font-size: 9.8pt; line-height: 1.42; }
+  thead { display: table-header-group; }
+  th { padding: 2.3mm 3mm; background: var(--ink); color: var(--paper); text-align: left; font: 500 7.6pt var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+  td { padding: 2.2mm 3mm; border-top: 1px solid var(--line); vertical-align: top; }
+  tbody tr:first-child td { border-top: 0; }
+  tbody tr:nth-child(even) td { background: var(--paper-soft); }
+  tr { break-inside: avoid; }
+  td:first-child { font-weight: 600; }
+
+  code { padding: .3mm 1.2mm; border-radius: 1mm; background: var(--code-bg); font: 400 8.8pt var(--mono); }
+  pre.tree, pre.json { margin: 0; padding: 4.5mm 5mm; border: 1px solid var(--line); border-radius: 3mm; background: var(--paper-soft); font: 400 9pt/1.55 var(--mono); white-space: pre; break-inside: avoid; }
+  pre.json { font-size: 8.6pt; white-space: pre-wrap; }
+  .tree b { font-weight: 500; color: var(--accent); }
+  .tree i { font-style: normal; color: var(--muted); }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5mm; }
+  .card-label { margin: 0 0 1.5mm; font: 500 7.6pt var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+
+  table.dense { font-size: 9.3pt; }
+  table.dense td { padding: 1.6mm 3mm; }
+  table.dense th { padding: 1.9mm 3mm; }
+  .tag { display: inline-block; padding: .4mm 2mm; border-radius: 10mm; font: 500 7.2pt var(--mono); letter-spacing: .08em; text-transform: uppercase; vertical-align: .3mm; }
+  .tag.todo { background: var(--err-bg); color: var(--accent); }
+  .tag.ok { background: var(--ok-bg); color: var(--ok); }
+  .tag.trade { background: var(--limit-bg); color: #7a5d00; }
+  .how { margin-top: 6mm; padding: 3.5mm 5mm; border: 1.5px dashed var(--line); border-radius: 3mm; font-size: 9.5pt; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ═════════════════════════════ Cover ═════════════════════════════ -->
+<div class="sheet">
+<section class="cover">
+  <div class="cover-main">
+    <p class="eyebrow">TicketRush · server/</p>
+    <h1>Backend<br><span>architecture</span></h1>
+    <p class="cover-lede">How a request moves through the API, how sign-up and sign-in work, and which security controls and rate limits protect each route.</p>
+    <ul class="chips">
+      <li>Express 5</li><li>MongoDB Atlas · Mongoose 9</li><li>TypeScript</li><li>Node 24</li><li>zod · jose · argon2</li>
+    </ul>
+    <p class="updated">Last updated 30 Oct 2026 · sign-in added</p>
+  </div>
+  <nav class="toc">
+    <p class="toc-title">Contents</p>
+    <ol>
+      <li><a href="#s1"><span>01</span>System overview</a></li>
+      <li><a href="#s2"><span>02</span>Code layout and layers</a></li>
+      <li><a href="#s3"><span>03</span>Global middleware</a></li>
+      <li><a href="#s4"><span>04</span>Auth router</a></li>
+      <li><a href="#s5"><span>05</span>Routes and responses</a></li>
+      <li><a href="#s6"><span>06</span>Rate limits</a></li>
+      <li><a href="#s7"><span>07</span>Sign-up flow</a></li>
+      <li><a href="#s8"><span>08</span>Sign-in flow</a></li>
+      <li><a href="#s9"><span>09</span>Tokens and protected routes</a></li>
+      <li><a href="#s10"><span>10</span>Error handling</a></li>
+      <li><a href="#s11"><span>11</span>Data model</a></li>
+      <li><a href="#s12"><span>12</span>Startup and shutdown</a></li>
+      <li><a href="#s13"><span>13</span>Security controls</a></li>
+      <li><a href="#s14"><span>14</span>Configuration and testing</a></li>
+      <li><a href="#s15"><span>15</span>Known gaps and next steps</a></li>
+    </ol>
+  </nav>
+  <div class="stub" aria-hidden="true"><span>Admit one</span><i></i><b>Nº 000001</b></div>
+</section>
+</div>
+
+<!-- ═════════════════════════════ 01 ═════════════════════════════ -->
+<section class="slide" id="s1">
+  <header class="sh"><span class="num">01</span><div><h2>System overview</h2><p>Who talks to whom, and where the data lives.</p></div></header>
+  <figure data-max-h="100">
+<pre class="mermaid">
+flowchart LR
+  subgraph browser["Browser"]
+    fe["Next.js front-end<br>localhost:5173"]
+  end
+  subgraph api["Express API · server/"]
+    mw["Middleware<br>helmet · cors · pino-http · json"]
+    auth["auth module<br>routes → controller → service"]
+  end
+  subgraph atlas["MongoDB Atlas cluster"]
+    dev[("ticker-rush-dev<br>npm run dev")]
+    test[("ticker-rush-test<br>npm test only")]
+  end
+  fe -->|"JSON · credentials: include"| mw
+  mw --> auth
+  auth -->|Mongoose| dev
+  auth -.->|"tests override dbName"| test
+</pre>
+  </figure>
+  <div class="points row" style="margin-top:5mm">
+    <h4>Key points</h4>
+    <ul>
+      <li>The browser calls the API <b>directly</b>, cross-origin. The Next.js server is not in the request path.</li>
+      <li>CORS lets exactly one origin in (<code>CORS_ORIGIN</code>), with credentials, so the refresh cookie can travel.</li>
+      <li>Only the API touches MongoDB. Dev data is in <code>ticker-rush-dev</code>; <code>npm test</code> uses <code>ticker-rush-test</code>.</li>
+      <li>Dev ports: front-end 5173, API 8080 (<code>PORT</code>, default 3000).</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 02 ═════════════════════════════ -->
+<section class="slide" id="s2">
+  <header class="sh"><span class="num">02</span><div><h2>Code layout and layers</h2><p>Where things live, and the one-way flow between layers.</p></div></header>
+  <div class="cols layout">
+<pre class="tree">server/src/
+├── <b>server.ts</b>                <i>entry: connect DB → listen → shutdown</i>
+├── <b>app.ts</b>                   <i>middleware, /health, /api/v1, errors</i>
+├── <b>routes.ts</b>                <i>apiRouter: mounts each module</i>
+├── config/
+│   ├── env.ts               <i>zod-validated env → config</i>
+│   ├── database.ts          <i>connect / disconnect, connection logs</i>
+│   └── logger.ts            <i>pino (redaction) + pino-http</i>
+├── common/
+│   ├── errors/app-error.ts  <i>AppError(status, message, CODE)</i>
+│   ├── errors/error.middleware.ts  <i>404 + errorHandler</i>
+│   └── middleware/validate.ts      <i>validateBody(schema)</i>
+└── modules/auth/
+    ├── auth.routes.ts       <i>URLs, middleware chain, rate limits</i>
+    ├── auth.validation.ts   <i>zod schemas</i>
+    ├── auth.types.ts        <i>types inferred from schemas</i>
+    ├── auth.controller.ts   <i>HTTP: status, headers, cookie</i>
+    ├── auth.service.ts      <i>hashing, credentials, sessions</i>
+    ├── auth.tokens.ts       <i>JWT sign/verify, sha256</i>
+    ├── auth.middleware.ts   <i>requireAuth, requireRole</i>
+    ├── auth.model.ts        <i>AuthAccount collection</i>
+    ├── auth-token.model.ts  <i>AuthToken collection</i>
+    └── auth.test.ts         <i>node:test integration tests</i></pre>
+    <div class="stack">
+      <figure data-max-h="80">
+<pre class="mermaid">
+flowchart TB
+  V["validation.ts<br>zod schemas"] -.->|validateBody| R["routes.ts<br>URL + middleware"]
+  R --> C["controller.ts<br>HTTP only"]
+  C --> S["service.ts<br>business rules"]
+  S --> M["model.ts<br>schema + indexes"]
+  M --> DB[("MongoDB")]
+  S -.->|"throw AppError"| E["errorHandler"]
+</pre>
+      </figure>
+      <div class="points">
+        <h4>Rules</h4>
+        <ul>
+          <li>Dependencies point one way: routes → controller → service → model.</li>
+          <li>Controllers own HTTP. Services never see <code>req</code> or <code>res</code>.</li>
+          <li>Services fail by throwing <code>AppError</code>. No try/catch in controllers: Express 5 forwards rejected promises.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 03 ═════════════════════════════ -->
+<section class="slide" id="s3">
+  <header class="sh"><span class="num">03</span><div><h2>Global middleware</h2><p>What every request passes through before any route code runs (<code>app.ts</code>).</p></div></header>
+  <figure data-max-h="50">
+<pre class="mermaid">
+flowchart LR
+  req(["request"]) --> helmet["helmet<br>security headers"]
+  helmet --> cors["cors<br>CORS_ORIGIN only<br>ends OPTIONS preflights"]
+  cors --> log["pino-http<br>request log"]
+  log --> json["express.json<br>body max 1 MB"]
+  json -->|"GET /health"| ok(["200 status: ok"])
+  json -->|"/api/v1/auth/*"| auth["authRouter<br>section 04"]
+  json -->|"anything else"| nf["notFoundHandler<br>404 NOT_FOUND"]
+  json -.->|"bad JSON 400<br>too large 413"| eh["errorHandler<br>error → JSON"]
+  nf --> eh
+  classDef err fill:#fdecea,stroke:#dc4527,color:#16130f
+  class nf,eh err
+</pre>
+    <figcaption><span class="sw err"></span>error exits. Middleware runs in registration order; any step can stop the request with <code>next(error)</code>.</figcaption>
+  </figure>
+  <h3>What each step is for</h3>
+  <table class="dense">
+    <thead><tr><th>Middleware</th><th>What it does</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>helmet</td><td>Adds security headers: CSP, HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy…</td><td>Browser-side hardening on every response, for free.</td></tr>
+      <tr><td>cors</td><td>Allows only <code>CORS_ORIGIN</code>, with credentials. Answers <code>OPTIONS</code> preflights itself.</td><td>Other sites can't call the API from a user's browser. Preflights never reach a rate limiter.</td></tr>
+      <tr><td>pino-http</td><td>Logs method, URL, status and response time; gives handlers <code>req.log</code>.</td><td>Every request is traceable, without logging bodies or secrets.</td></tr>
+      <tr><td>express.json</td><td>Parses JSON bodies up to 1 MB.</td><td>Malformed (400) and oversized (413) bodies are rejected before any logic runs.</td></tr>
+      <tr><td>notFound + errorHandler</td><td>Turns unknown routes and every thrown error into JSON.</td><td>The client always gets one consistent error shape (section 10).</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ═════════════════════════════ 04 ═════════════════════════════ -->
+<section class="slide" id="s4">
+  <header class="sh"><span class="num">04</span><div><h2>Auth router</h2><p>How every <code>/api/v1/auth</code> route is guarded (<code>auth.routes.ts</code>).</p></div></header>
+  <figure data-max-h="88">
+<pre class="mermaid">
+flowchart LR
+  in(["/api/v1/auth/*"]) --> rl["auth limiter<br>20 / IP / 15 min"]
+  rl -->|"POST /signup"| su["validateBody<br>signUpSchema"]
+  rl -->|"POST /signin"| si["validateBody<br>signInSchema"]
+  rl -->|"POST /refresh"| rf["validateBody<br>refreshTokenSchema"]
+  rl -->|"other path"| nf["404 NOT_FOUND"]
+  su --> suc["controller<br>signUp"]
+  si --> sil["sign-in limiters<br>5 / IP+email<br>10 / email<br>failures only"]
+  sil --> sic["controller<br>signIn"]
+  rf --> rfc["controller<br>refresh · 501"]
+  suc --> svc["auth.service"]
+  sic --> svc
+  svc --> db[("MongoDB")]
+  classDef err fill:#fdecea,stroke:#dc4527,color:#16130f
+  classDef limit fill:#fff1b8,stroke:#c99a00,color:#16130f
+  class nf,rfc err
+  class rl,sil limit
+</pre>
+    <figcaption><span class="sw limit"></span>rate limiters &nbsp; <span class="sw err"></span>error exits / stubs</figcaption>
+  </figure>
+  <div class="points row" style="margin-top:5mm">
+    <h4>Key points</h4>
+    <ul>
+      <li>The auth limiter counts <b>every</b> request under <code>/auth</code>, including invalid bodies and unknown paths.</li>
+      <li><code>validateBody</code> parses with zod and replaces <code>req.body</code> with the clean value: trimmed, email lowercased, unknown keys dropped.</li>
+      <li>The sign-in limiters run <b>after</b> validation, so <code>A@x.com</code> and <code>a@x.com</code> share one counter.</li>
+      <li>Any step can fail into <code>errorHandler</code>: 429 from a limiter, 422 from validation, 401 / 409 from the service, 501 from the refresh stub.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 05 ═════════════════════════════ -->
+<section class="slide" id="s5">
+  <header class="sh"><span class="num">05</span><div><h2>Routes and responses</h2><p>Every endpoint, what runs in front of it, and what it can answer.</p></div></header>
+  <table>
+    <thead><tr><th>Route</th><th>Access</th><th>Middleware chain (after global)</th><th>Success</th><th>Errors</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /health</code></td><td>public</td><td>none</td><td>200 <code>{status:"ok"}</code></td><td>none</td></tr>
+      <tr><td><code>POST /api/v1/auth/signup</code></td><td>public</td><td>auth limiter → validateBody(signUpSchema) → signUp</td><td>201 <code>{message}</code></td><td>409 EMAIL_ALREADY_EXISTS · 422 · 429</td></tr>
+      <tr><td><code>POST /api/v1/auth/signin</code></td><td>public</td><td>auth limiter → validateBody(signInSchema) → 2 sign-in limiters → signIn</td><td>200 <code>{user, accessToken}</code> + <code>refresh_token</code> cookie</td><td>401 INVALID_CREDENTIALS · 422 · 429</td></tr>
+      <tr><td><code>POST /api/v1/auth/refresh</code> <span class="tag todo">stub</span></td><td>public</td><td>auth limiter → validateBody(refreshTokenSchema) → refresh</td><td>not built yet</td><td>501 NOT_IMPLEMENTED · 422 · 429</td></tr>
+    </tbody>
+  </table>
+  <h3>Response shapes</h3>
+  <div class="cards">
+    <div>
+      <p class="card-label">200 · sign-in</p>
+<pre class="json">{
+  "user": {
+    "id": "6721…", "name": "Ada Lovelace",
+    "email": "ada@example.com", "role": "user"
+  },
+  "accessToken": "eyJhbGciOiJIUzI1NiJ9…"
+}
++ Set-Cookie: refresh_token=…; HttpOnly;
+  Secure; SameSite=Strict; Path=/api/v1/auth</pre>
+    </div>
+    <div>
+      <p class="card-label">4xx / 5xx · any error</p>
+<pre class="json">{
+  "code": "INVALID_CREDENTIALS",
+  "message": "Invalid email or password"
+}</pre>
+    </div>
+    <div>
+      <p class="card-label">422 · validation</p>
+<pre class="json">{
+  "code": "VALIDATION_ERROR",
+  "errors": {
+    "formErrors": [],
+    "fieldErrors": {
+      "password": ["Too small: expected
+                    string to have >=12 characters"]
+    }
+  }
+}</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 06 ═════════════════════════════ -->
+<section class="slide" id="s6">
+  <header class="sh"><span class="num">06</span><div><h2>Rate limits</h2><p>Three layers, each stopping a different kind of password guessing.</p></div></header>
+  <table class="dense">
+    <thead><tr><th>Limiter</th><th>Applies to</th><th>Counted per</th><th>Limit</th><th>What counts</th><th>Stops</th></tr></thead>
+    <tbody>
+      <tr><td>Auth limiter</td><td>every request under <code>/api/v1/auth</code></td><td>client IP</td><td>20 / 15 min</td><td>every request</td><td>one machine spraying requests</td></tr>
+      <tr><td>Sign-in · IP + email</td><td><code>POST /signin</code>, after validation</td><td>IP + normalised email</td><td>5 / 15 min</td><td>failures only (status ≥ 400)</td><td>guessing one password from one machine</td></tr>
+      <tr><td>Sign-in · email</td><td><code>POST /signin</code>, after validation</td><td>normalised email, any IP</td><td>10 / 15 min</td><td>failures only</td><td>guessing one password from many machines</td></tr>
+    </tbody>
+  </table>
+  <figure data-max-h="46" style="margin-top:4mm">
+<pre class="mermaid">
+flowchart LR
+  a(["POST /signin"]) --> g{"≥ 20 auth requests<br>from this IP?"}
+  g -->|yes| x1["429 RATE_LIMITED"]
+  g -->|no| v{"body valid?"}
+  v -->|no| x2["422 VALIDATION_ERROR"]
+  v -->|yes| l1{"≥ 5 failures for<br>this IP + email?"}
+  l1 -->|yes| x1
+  l1 -->|no| l2{"≥ 10 failures for<br>this email, any IP?"}
+  l2 -->|yes| x1
+  l2 -->|no| c["check password"]
+  c -->|wrong| f["401 · counted as a failure"]
+  c -->|right| s["200 · not counted"]
+  classDef err fill:#fdecea,stroke:#dc4527,color:#16130f
+  class x1,x2,f err
+</pre>
+  </figure>
+  <div class="points" style="margin-top:4mm">
+    <h4>How they're implemented</h4>
+    <p><code>express-rate-limit</code> with fixed 15-minute windows; responses carry the IETF <code>RateLimit</code> and <code>RateLimit-Policy</code> headers. Counters live <b>in process memory</b>: they reset on restart and are not shared between instances. <span class="tag trade">trade-off</span> The email-only limiter lets anyone lock an email out of sign-in for up to 15 minutes.</p>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 07 ═════════════════════════════ -->
+<section class="slide" id="s7">
+  <header class="sh"><span class="num">07</span><div><h2>Sign-up flow</h2><p><code>POST /api/v1/auth/signup</code>, step by step.</p></div></header>
+  <div class="cols seq">
+    <figure data-max-h="150">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant R as Middleware
+  participant C as Controller
+  participant S as Service
+  participant DB as MongoDB
+  B->>R: POST /signup {name, email, password}
+  Note over R,C: auth limiter, then validateBody: trim name,<br>trim + lowercase email, password 12–128 chars
+  R->>C: signUp(req)
+  C->>S: signUp(body)
+  S->>DB: exists(email)
+  alt email already registered
+    S-->>B: 409 EMAIL_ALREADY_EXISTS
+  else new email
+    Note over S,DB: argon2id hash: 19 MiB, 2 passes, 1 thread
+    S->>DB: save AuthAccount, role = "user"
+    alt two signups raced (E11000)
+      S-->>B: 409 EMAIL_ALREADY_EXISTS
+    else saved
+      C-->>B: 201 {message}
+    end
+  end
+</pre>
+    </figure>
+    <div class="points">
+      <h4>Key points</h4>
+      <ul>
+        <li>The email is trimmed and lowercased first, so <code>Ada@X.com</code> and <code>ada@x.com</code> are one account.</li>
+        <li>zod drops unknown keys: sending <code>"role": "admin"</code> does nothing.</li>
+        <li>Passwords are hashed with argon2id at the OWASP minimum cost.</li>
+        <li>The unique index catches two simultaneous sign-ups that both passed the <code>exists</code> check.</li>
+        <li>Logged as <code>signup_succeeded {userId}</code>.</li>
+        <li><span class="tag trade">by choice</span> 409 reveals registered emails until email verification exists.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 08 ═════════════════════════════ -->
+<section class="slide" id="s8">
+  <header class="sh"><span class="num">08</span><div><h2>Sign-in flow</h2><p><code>POST /api/v1/auth/signin</code>, step by step.</p></div></header>
+  <div class="cols seq">
+    <figure data-max-h="152">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant R as Middleware
+  participant C as Controller
+  participant S as Service
+  participant DB as MongoDB
+  B->>R: POST /signin {email, password}
+  Note over R,C: auth limiter → validateBody (password 1–128)<br>→ sign-in limiters
+  R->>C: signIn(req)
+  C->>S: signIn(body, userAgent, ip)
+  S->>DB: findOne(email) + passwordHash
+  DB-->>S: account or null
+  Note over S,DB: argon2.verify against the account's hash,<br>or a dummy hash when there is no account
+  alt unknown email or wrong password
+    S-->>B: 401 INVALID_CREDENTIALS
+  else password matches
+    Note over S,DB: sign access JWT (15 min)<br>+ refresh JWT (7 days, random jti)
+    S->>DB: save sha256(refresh), userId, expiresAt, UA, IP
+    S-->>C: user + tokens
+    C-->>B: 200 {user, accessToken} · no-store
+    C-->>B: Set-Cookie refresh_token (HttpOnly, Secure, Strict)
+  end
+</pre>
+    </figure>
+    <div class="points">
+      <h4>Key points</h4>
+      <ul>
+        <li>Unknown email and wrong password get the <b>same</b> 401 body, and the dummy hash makes them take the same time.</li>
+        <li>The access token goes in the body. The refresh token goes <b>only</b> in the cookie.</li>
+        <li>Only a sha256 of the refresh token is stored, with user-agent and IP for a future "your devices" list.</li>
+        <li>JWT <code>exp</code>, database <code>expiresAt</code> and cookie <code>Expires</code> come from one Date.</li>
+        <li>Logged as <code>signin_failed {reason}</code> or <code>signin_succeeded {userId}</code>, never with the email.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 09 ═════════════════════════════ -->
+<section class="slide" id="s9">
+  <header class="sh"><span class="num">09</span><div><h2>Tokens and protected routes</h2><p>Two tokens with different jobs, and the check that guards private routes.</p></div></header>
+  <table>
+    <thead><tr><th style="width:30mm"></th><th>Access token</th><th>Refresh token</th></tr></thead>
+    <tbody>
+      <tr><td>Format</td><td>JWT, HS256, signed with <code>JWT_ACCESS_SECRET</code></td><td>JWT, HS256, signed with <code>JWT_REFRESH_SECRET</code></td></tr>
+      <tr><td>Claims</td><td><code>sub</code> (user id), <code>role</code>, <code>kind: "access"</code>, <code>jti</code>, <code>iat</code>, <code>exp</code></td><td>same, with <code>kind: "refresh"</code></td></tr>
+      <tr><td>Lifetime</td><td>15 minutes (<code>JWT_ACCESS_TOKEN_TTL</code>)</td><td>7 days (<code>JWT_REFRESH_TOKEN_TTL_DAYS</code>)</td></tr>
+      <tr><td>Client keeps it</td><td>in memory (React state), never localStorage</td><td>cookie <code>refresh_token</code>: HttpOnly, Secure, SameSite=Strict, Path=/api/v1/auth</td></tr>
+      <tr><td>Sent as</td><td><code>Authorization: Bearer &lt;token&gt;</code></td><td>automatically by the browser, only to <code>/api/v1/auth/*</code></td></tr>
+      <tr><td>Server stores</td><td>nothing (stateless)</td><td>sha256 hash in <code>authtokens</code>; a TTL index deletes it after expiry</td></tr>
+      <tr><td>Revocable</td><td>no; it expires within 15 minutes</td><td>yes, via <code>revokedAt</code> or deletion (once refresh and logout exist)</td></tr>
+    </tbody>
+  </table>
+  <h3>Protected routes <span class="tag todo">built, not mounted yet</span></h3>
+  <figure data-max-h="42">
+<pre class="mermaid">
+flowchart LR
+  r(["request"]) --> h{"Bearer<br>token?"}
+  h -->|no| e1["401 UNAUTHENTICATED"]
+  h -->|yes| v["verifyAccessToken<br>HS256 only · signature · exp<br>kind = access · known role"]
+  v -->|fails| e2["401 INVALID_ACCESS_TOKEN"]
+  v -->|ok| a["req.auth = { id, role }"]
+  a --> rr{"requireRole<br>allows role?"}
+  rr -->|no| e3["403 FORBIDDEN"]
+  rr -->|"yes / not used"| ok(["route handler"])
+  classDef err fill:#fdecea,stroke:#dc4527,color:#16130f
+  class e1,e2,e3 err
+</pre>
+    <figcaption>Usage: <code>router.get("/admin/x", requireAuth, requireRole("admin"), handler)</code>. Pinning HS256 blocks algorithm-confusion attacks; the <code>kind</code> claim stops a refresh token being used as an access token.</figcaption>
+  </figure>
+</section>
+
+<!-- ═════════════════════════════ 10 ═════════════════════════════ -->
+<section class="slide" id="s10">
+  <header class="sh"><span class="num">10</span><div><h2>Error handling</h2><p>One place turns every failure into the same JSON shape.</p></div></header>
+  <div class="cols half">
+    <div class="stack">
+      <p class="intro">Services fail by throwing <code>new AppError(status, message, CODE)</code>. Every error, from any layer, ends in <code>errorHandler</code>. 4xx errors are logged at <code>warn</code>, 500s at <code>error</code> with the stack.</p>
+      <figure data-max-h="118">
+<pre class="mermaid">
+flowchart TB
+  e(["error reaches errorHandler"]) --> z{"ZodError?"}
+  z -->|yes| r1["422 VALIDATION_ERROR<br>formErrors + fieldErrors"]
+  z -->|no| a{"AppError?"}
+  a -->|yes| r2["its status<br>code + message"]
+  a -->|no| b{"4xx status set?<br>body parser"}
+  b -->|yes| r3["400 / 413<br>code from status name"]
+  b -->|no| r4["500 INTERNAL_SERVER_ERROR<br>details only in logs"]
+  classDef err fill:#fdecea,stroke:#dc4527,color:#16130f
+  class r4 err
+</pre>
+      </figure>
+    </div>
+    <table>
+      <thead><tr><th>Code</th><th>Status</th><th>Raised by</th></tr></thead>
+      <tbody>
+        <tr><td>VALIDATION_ERROR</td><td>422</td><td><code>validateBody</code> (zod)</td></tr>
+        <tr><td>EMAIL_ALREADY_EXISTS</td><td>409</td><td><code>signUp</code>: pre-check or unique-index race</td></tr>
+        <tr><td>INVALID_CREDENTIALS</td><td>401</td><td><code>signIn</code>: unknown email or wrong password</td></tr>
+        <tr><td>RATE_LIMITED</td><td>429</td><td>any limiter in <code>auth.routes.ts</code></td></tr>
+        <tr><td>UNAUTHENTICATED</td><td>401</td><td><code>requireAuth</code>: no Bearer header</td></tr>
+        <tr><td>INVALID_ACCESS_TOKEN</td><td>401</td><td><code>verifyAccessToken</code></td></tr>
+        <tr><td>FORBIDDEN</td><td>403</td><td><code>requireRole</code></td></tr>
+        <tr><td>NOT_FOUND</td><td>404</td><td><code>notFoundHandler</code></td></tr>
+        <tr><td>NOT_IMPLEMENTED</td><td>501</td><td><code>refresh</code> stub</td></tr>
+        <tr><td>INTERNAL_SERVER_ERROR</td><td>500</td><td>anything unexpected</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 11 ═════════════════════════════ -->
+<section class="slide" id="s11">
+  <header class="sh"><span class="num">11</span><div><h2>Data model</h2><p>Two collections: accounts, and the tokens issued to them.</p></div></header>
+  <div class="cols">
+    <figure data-max-h="148">
+<pre class="mermaid">
+erDiagram
+  AuthAccount ||--o{ AuthToken : "owns"
+  AuthAccount {
+    ObjectId _id PK
+    string name "trimmed, max 100"
+    string email UK "trimmed, lowercase"
+    string passwordHash "argon2id, select false"
+    string role "user or admin"
+    date createdAt
+    date updatedAt
+  }
+  AuthToken {
+    ObjectId _id PK
+    string tokenHash UK "sha256, select false"
+    ObjectId userId FK "AuthAccount"
+    string type "refresh, password_reset, email_verification"
+    date expiresAt "TTL index"
+    date revokedAt "null while active"
+    string userAgent "max 512"
+    string ipAddress "max 45"
+  }
+</pre>
+    </figure>
+    <div class="points">
+      <h4>Indexes and why</h4>
+      <ul>
+        <li><code>authaccounts.email</code> unique: one account per email; catches sign-up races.</li>
+        <li><code>authtokens.tokenHash</code> unique: finds a presented token in one lookup.</li>
+        <li><code>authtokens {userId, type}</code>: per-user operations like "log out everywhere"; also serves <code>userId</code>-only queries.</li>
+        <li><code>authtokens.expiresAt</code> TTL: MongoDB deletes expired tokens itself (about once a minute).</li>
+        <li><code>select: false</code> hides <code>passwordHash</code> and <code>tokenHash</code> unless a query asks for them.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 12 ═════════════════════════════ -->
+<section class="slide" id="s12">
+  <header class="sh"><span class="num">12</span><div><h2>Startup and shutdown</h2><p>How the process comes up, and how it goes down cleanly (<code>server.ts</code>).</p></div></header>
+  <figure data-max-h="92">
+<pre class="mermaid">
+flowchart TB
+  subgraph up["Startup"]
+    direction LR
+    start(["npm run dev / start"]) --> env["config/env.ts<br>zod-parse process.env<br>invalid → crash"]
+    env --> db["connectDatabase()"]
+    db -->|ok| listen["app.listen(PORT)<br>serving"]
+    db -->|fails| x(["log fatal · exit 1<br>never listens"])
+  end
+  subgraph down["Shutdown · runs once"]
+    direction LR
+    sig(["SIGINT · SIGTERM<br>uncaughtException<br>unhandledRejection"]) --> close["server.close()<br>finish in-flight requests"]
+    close --> disc["disconnectDatabase()"]
+    disc --> done(["exit 0<br>or 1 on crash / error"])
+  end
+  up --> down
+  classDef err fill:#fdecea,stroke:#dc4527,color:#16130f
+  class x err
+</pre>
+  </figure>
+  <div class="points row" style="margin-top:5mm">
+    <h4>Key points</h4>
+    <ul>
+      <li>MongoDB connects <b>before</b> the port opens, so the API never takes traffic it can't serve.</li>
+      <li>A bad or missing env variable stops the process at import time with a zod error.</li>
+      <li>On SIGINT/SIGTERM the server stops accepting, lets in-flight requests finish, then closes MongoDB.</li>
+      <li>Crashes take the same path and exit with code 1.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 13 ═════════════════════════════ -->
+<section class="slide" id="s13">
+  <header class="sh"><span class="num">13</span><div><h2>Security controls</h2><p>Each threat, what stops it, and where that lives in the code.</p></div></header>
+  <table class="dense">
+    <thead><tr><th style="width:52mm">Threat</th><th>Control</th><th style="width:62mm">Where</th></tr></thead>
+    <tbody>
+      <tr><td>Stolen database → passwords</td><td>argon2id, 19 MiB memory, 2 passes, 1 thread (OWASP minimum). Hash not selected by default.</td><td><code>auth.service.ts</code>, <code>auth.model.ts</code></td></tr>
+      <tr><td>Stolen database → sessions</td><td>Only sha256 hashes of refresh tokens are stored.</td><td><code>auth.tokens.ts</code> · hashToken</td></tr>
+      <tr><td>Password guessing</td><td>Three layered rate limits (section 06).</td><td><code>auth.routes.ts</code></td></tr>
+      <tr><td>Email enumeration at sign-in</td><td>Identical 401 body, plus a dummy argon2 verify so timing matches.</td><td><code>auth.service.ts</code> · signIn</td></tr>
+      <tr><td>XSS stealing tokens</td><td>Refresh token is HttpOnly. Access token lives only in memory and expires in 15 minutes.</td><td><code>auth.controller.ts</code>, front-end <code>session.tsx</code></td></tr>
+      <tr><td>CSRF and login CSRF</td><td>SameSite=Strict cookie scoped to <code>/api/v1/auth</code>. JSON-only bodies force a CORS preflight that only <code>CORS_ORIGIN</code> passes.</td><td><code>app.ts</code>, <code>auth.controller.ts</code></td></tr>
+      <tr><td>Forged or confused JWTs</td><td>HS256 pinned on verify, a separate secret per token kind, <code>kind</code> and role checked.</td><td><code>auth.tokens.ts</code></td></tr>
+      <tr><td>Token caching</td><td><code>Cache-Control: no-store</code> on token responses.</td><td><code>auth.controller.ts</code></td></tr>
+      <tr><td>Privilege escalation via body</td><td>zod drops unknown keys, so <code>role</code> can't be set at sign-up.</td><td><code>auth.validation.ts</code></td></tr>
+      <tr><td>NoSQL injection</td><td>zod requires strings; objects like <code>{"$gt": ""}</code> get 422.</td><td><code>auth.validation.ts</code></td></tr>
+      <tr><td>Oversized input, CPU abuse</td><td>1 MB body limit, max lengths on every field, password capped at 128 characters before hashing.</td><td><code>app.ts</code>, <code>auth.validation.ts</code></td></tr>
+      <tr><td>Secrets in logs</td><td>pino redacts password and token fields; request logs keep only method and URL; auth events log userId, never email.</td><td><code>config/logger.ts</code></td></tr>
+      <tr><td>Clickjacking, MIME sniffing</td><td>helmet default headers.</td><td><code>app.ts</code></td></tr>
+      <tr><td>Misconfiguration</td><td>Env validated at startup; bad values crash immediately.</td><td><code>config/env.ts</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ═════════════════════════════ 14 ═════════════════════════════ -->
+<section class="slide" id="s14">
+  <header class="sh"><span class="num">14</span><div><h2>Configuration and testing</h2><p>Every setting the server reads, and how its behaviour is checked.</p></div></header>
+  <div class="cols env">
+    <div class="stack">
+      <p class="intro">Loaded with Node's built-in <code>--env-file=.env</code> and validated by zod in <code>config/env.ts</code>. Code reads <code>config.X</code>, never <code>process.env</code>. A new variable goes in the schema and in <code>.env.example</code>.</p>
+      <table>
+        <thead><tr><th>Variable</th><th>Rule</th><th>Default</th><th>Used for</th></tr></thead>
+        <tbody>
+          <tr><td>NODE_ENV</td><td>development · test · production</td><td>development</td><td>log level; <code>test</code> silences logs</td></tr>
+          <tr><td>PORT</td><td>1–65535</td><td>3000</td><td><code>app.listen</code> (dev: 8080)</td></tr>
+          <tr><td>MONGODB_URI</td><td>required</td><td></td><td>cluster + database <code>ticker-rush-dev</code></td></tr>
+          <tr><td>CORS_ORIGIN</td><td>URL, required</td><td></td><td>the one allowed browser origin</td></tr>
+          <tr><td>JWT_ACCESS_SECRET</td><td>≥ 15 chars <span class="tag todo">gap</span></td><td></td><td>signs access tokens</td></tr>
+          <tr><td>JWT_REFRESH_SECRET</td><td>≥ 15 chars <span class="tag todo">gap</span></td><td></td><td>signs refresh tokens</td></tr>
+          <tr><td>JWT_ACCESS_TOKEN_TTL</td><td>time span</td><td>15m</td><td>access token lifetime</td></tr>
+          <tr><td>JWT_REFRESH_TOKEN_TTL_DAYS</td><td>integer 1–30</td><td>7</td><td>refresh lifetime, cookie, DB TTL</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="points">
+      <h4>Testing · <code>npm test</code></h4>
+      <ul>
+        <li>Node's built-in <code>node:test</code> over <code>src/**/*.test.ts</code>, with <code>NODE_ENV=test</code>.</li>
+        <li>Starts the real app on a random port and calls it with <code>fetch</code>; no supertest.</li>
+        <li>Same <code>MONGODB_URI</code>, but <code>dbName</code> is overridden to <code>ticker-rush-test</code>. Tests delete what they create.</li>
+      </ul>
+      <h4 style="margin-top:5mm">Covered today</h4>
+      <ul>
+        <li>Sign-in returns the access token and the cookie with every flag; only the hash is stored.</li>
+        <li>Wrong password and unknown email get identical 401 bodies.</li>
+        <li>The 6th failed attempt for one email from one IP gets 429.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 15 ═════════════════════════════ -->
+<section class="slide" id="s15">
+  <header class="sh"><span class="num">15</span><div><h2>Known gaps and next steps</h2><p>What isn't safe or finished yet, and the plan for each.</p></div></header>
+  <table>
+    <thead><tr><th style="width:62mm">Gap</th><th>Risk today</th><th>Plan</th></tr></thead>
+    <tbody>
+      <tr><td><code>/refresh</code> and logout <span class="tag todo">next</span></td><td>Sessions can't be renewed or revoked; a page reload signs the user out.</td><td>Read the cookie, rotate the token on every use, detect reuse, add <code>/logout</code>. The body-based <code>refreshTokenSchema</code> goes away.</td></tr>
+      <tr><td>JWT secrets only need 15 chars</td><td>A short HS256 secret can be brute-forced offline from any token.</td><td>Raise the zod minimum to 32, as <code>.env.example</code> already says.</td></tr>
+      <tr><td>Rate limits in memory</td><td>Fine for one process; each extra instance multiplies the real limit.</td><td>Move to a Redis store when running more than one instance.</td></tr>
+      <tr><td><code>trust proxy</code> not set</td><td>Behind Nginx or a load balancer every client shares the proxy's IP, so one user can rate-limit everyone.</td><td>Set it to the proxy hop count at deploy time.</td></tr>
+      <tr><td>Sign-up reveals emails <span class="tag trade">by choice</span></td><td>409 on sign-up confirms an account exists (sign-in doesn't).</td><td>Revisit once email verification exists.</td></tr>
+      <tr><td>No email verification or reset</td><td>Anyone can sign up with someone else's email.</td><td>Use the <code>email_verification</code> / <code>password_reset</code> token types already in <code>AuthTokenModel</code>.</td></tr>
+      <tr><td>Per-email lockout <span class="tag trade">trade-off</span></td><td>An attacker can block a user's sign-in for up to 15 minutes.</td><td>Accepted for now; revisit with CAPTCHA or progressive delays.</td></tr>
+    </tbody>
+  </table>
+  <p class="how">Updating this document: edit <code>server/docs/architecture.html</code>, run <code>npm run docs:pdf</code> from <code>server/</code>, and commit both files. Update it whenever routes, middleware, security, rate limits, tokens, models, error codes or env variables change.</p>
+</section>
+
+</main>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "base",
+    themeVariables: {
+      fontFamily: "Instrument Sans, Helvetica Neue, Arial, sans-serif",
+      fontSize: "15px",
+      primaryColor: "#fffdf8",
+      primaryBorderColor: "#16130f",
+      primaryTextColor: "#16130f",
+      lineColor: "#3d362d",
+      secondaryColor: "#f4ecdc",
+      tertiaryColor: "#ffffff",
+      edgeLabelBackground: "#ffffff",
+      clusterBkg: "#faf6ee",
+      clusterBorder: "#cbbfae",
+      noteBkgColor: "#fff1b8",
+      noteBorderColor: "#c99a00",
+      noteTextColor: "#16130f",
+      actorBkg: "#16130f",
+      actorBorder: "#16130f",
+      actorTextColor: "#f4ecdc",
+      actorLineColor: "#9a8f80",
+      signalColor: "#16130f",
+      signalTextColor: "#16130f",
+      // alt/else labels default to actorTextColor (cream), which vanishes on white.
+      labelBoxBkgColor: "#f4ecdc",
+      labelBoxBorderColor: "#3d362d",
+      labelTextColor: "#16130f",
+      loopTextColor: "#16130f",
+      sequenceNumberColor: "#f4ecdc",
+      altSectionBkgColor: "#faf6ee",
+      attributeBackgroundColorOdd: "#ffffff",
+      attributeBackgroundColorEven: "#faf6ee",
+    },
+    flowchart: { curve: "basis", useMaxWidth: false, padding: 12, nodeSpacing: 34, rankSpacing: 42 },
+    sequence: { useMaxWidth: false, mirrorActors: false, wrap: true, width: 150, actorMargin: 55, messageFontSize: 16, noteFontSize: 15, actorFontSize: 15, messageMargin: 26, noteMargin: 10, boxMargin: 8 },
+    er: { useMaxWidth: false },
+  });
+
+  // Scale each diagram to fill its box without overflowing the page: width of its column,
+  // height capped by the figure's data-max-h (mm). Never enlarge past 1.3×.
+  function fitDiagrams() {
+    const pxPerMm = 96 / 25.4;
+    for (const svg of document.querySelectorAll(".mermaid svg")) {
+      const { width, height } = svg.viewBox.baseVal;
+      const maxWidth = svg.parentElement.clientWidth;
+      const maxHeight = Number(svg.closest("[data-max-h]")?.dataset.maxH ?? 120) * pxPerMm;
+      const scale = Math.min(1.3, maxWidth / width, maxHeight / height);
+      svg.style.maxWidth = "none";
+      svg.setAttribute("width", String(width * scale));
+      svg.setAttribute("height", String(height * scale));
+    }
+  }
+
+  // docs/render-pdf.mjs waits for this flag before printing.
+  try {
+    // Mermaid measures text while laying out, so the fonts must be ready first.
+    await Promise.all(
+      ["400 15px 'Instrument Sans'", "600 15px 'Instrument Sans'", "800 20px 'Big Shoulders'", "400 12px 'DM Mono'"].map((font) => document.fonts.load(font)),
+    );
+    await mermaid.run();
+    fitDiagrams();
+    document.body.dataset.rendered = "true";
+  } catch (error) {
+    document.body.dataset.rendered = `error: ${error.message}`;
+  }
+</script>
+</body>
+</html>
