@@ -65,8 +65,10 @@ export async function verifyAccessToken(token: string): Promise<AuthenticatedUse
   }
 }
 
-export const sessionEnded = () =>
-  new AppError(401, "Your session has ended. Please sign in again.", "INVALID_REFRESH_TOKEN");
+// One error for every way a refresh fails (missing, expired, reused, logged out), so the reply never says which.
+export function sessionEnded(): AppError {
+  return new AppError(401, "Your session has ended. Please sign in again.", "INVALID_REFRESH_TOKEN");
+}
 
 /** Returns the sign-in time (auth_time) the session started at. */
 export async function verifyRefreshToken(token: string): Promise<Date> {

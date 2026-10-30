@@ -14,11 +14,16 @@ export const signUp: RequestHandler<never, SignUpResponse, SignUpInput> = async 
 };
 
 export const signIn: RequestHandler<never, AuthResponse, SignInInput> = async (req, res) => {
-  sendSession(res, await authService.signIn(req.body, clientOf(req)));
+  const client = clientOf(req);
+  const session = await authService.signIn(req.body, client);
+  sendSession(res, session);
 };
 
 export const refresh: RequestHandler<never, AuthResponse> = async (req, res) => {
-  sendSession(res, await authService.refresh(refreshTokenOf(req), clientOf(req)));
+  const refreshToken = refreshTokenOf(req);
+  const client = clientOf(req);
+  const session = await authService.refresh(refreshToken, client);
+  sendSession(res, session);
 };
 
 // Always 204: logging out with no cookie, or an unknown one, still leaves you logged out.
