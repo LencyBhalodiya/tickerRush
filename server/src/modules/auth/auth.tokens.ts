@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { config } from "../../config/env.js";
 import { AppError } from "../../common/errors/app-error.js";
@@ -10,25 +10,28 @@ const refreshSecret = encoder.encode(config.JWT_REFRESH_SECRET);
 
 type TokenKind = "access" | "refresh";
 
-async function signToken(user: AuthUser, kind: TokenKind): Promise<string> {
+async function signToken(user: AuthUser, kind: TokenKind, expiresAt: string | Date): Promise<string> {
   const secret = kind === "access" ? accessSecret : refreshSecret;
-  const expiration = kind === "access" ? config.JWT_ACCESS_TOKEN_TTL : `${config.JWT_REFRESH_TOKEN_TTL_DAYS}d`;
 
   return new SignJWT({ role: user.role, kind })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
+    // Without a unique id, two sign-ins in the same second produce identical tokens (and tokenHash collides).
+    .setJti(randomUUID())
     .setIssuedAt()
-    .setExpirationTime(expiration)
+    .setExpirationTime(expiresAt)
     .sign(secret);
 }
 
 export async function createAuthTokens(user: AuthUser): Promise<AuthTokens> {
+  // One Date for the JWT, the DB record and the cookie, so all three expire together.
+  const refreshExpiresAt = new Date(Date.now() + config.JWT_REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
   const [accessToken, refreshToken] = await Promise.all([
-    signToken(user, "access"),
-    signToken(user, "refresh"),
+    signToken(user, "access", config.JWT_ACCESS_TOKEN_TTL),
+    signToken(user, "refresh", refreshExpiresAt),
   ]);
 
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, refreshExpiresAt };
 }
 
 /**

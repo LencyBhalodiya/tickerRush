@@ -16,13 +16,8 @@ export type AuthToken = {
 const authTokenSchema = new Schema<AuthToken>(
   {
     tokenHash: { type: String, required: true, unique: true, select: false },
-    userId: {
-      type: Schema.Types.ObjectId,
-      ref: "AuthAccount",
-      required: true,
-      index: true,
-    },
-    type: { type: String, enum: AUTH_TOKEN_TYPES, required: true, index: true },
+    userId: { type: Schema.Types.ObjectId, ref: "AuthAccount", required: true },
+    type: { type: String, enum: AUTH_TOKEN_TYPES, required: true },
     // `expires: 0` creates a TTL index; expiry is also checked in application logic.
     expiresAt: { type: Date, required: true, expires: 0 },
     revokedAt: { type: Date, default: null },
@@ -32,6 +27,7 @@ const authTokenSchema = new Schema<AuthToken>(
   { timestamps: true, versionKey: false },
 );
 
+// Also serves queries on userId alone (index prefix), so userId needs no index of its own.
 authTokenSchema.index({ userId: 1, type: 1 });
 
 export const AuthTokenModel = model<AuthToken>("AuthToken", authTokenSchema);

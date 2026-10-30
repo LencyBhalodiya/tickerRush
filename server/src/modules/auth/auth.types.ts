@@ -14,6 +14,7 @@ export type UserRole = (typeof USER_ROLES)[number];
 export type AuthTokens = {
   accessToken: string;
   refreshToken: string;
+  refreshExpiresAt: Date;
 };
 
 export type SignUpInput = z.infer<typeof signUpSchema>;

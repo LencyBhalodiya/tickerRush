@@ -6,7 +6,8 @@
     "build": "tsc",
     "start": "node --env-file=.env dist/server.js",
     "dev": "node --env-file=.env --import tsx --watch src/server.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "NODE_ENV=test node --env-file=.env --import tsx --test \"src/**/*.test.ts\"",
+    "docs:pdf": "node docs/render-pdf.mjs"
   },
   "keywords": [],
   "author": "",
