@@ -3,8 +3,8 @@ import { Router } from "express";
 import { ipKeyGenerator, rateLimit, type Options } from "express-rate-limit";
 import { AppError } from "../../common/errors/app-error.js";
 import { validateBody } from "../../common/middleware/validate.js";
-import { logout, refresh, signIn, signUp } from "./auth.controller.js";
-import { signInSchema, signUpSchema } from "./auth.validation.js";
+import { logout, refresh, signIn, signUp, verifyEmail } from "./auth.controller.js";
+import { signInSchema, signUpSchema, verifyEmailSchema } from "./auth.validation.js";
 
 // ponytail: in-memory store is per process; switch to rate-limit-redis once running more than one instance.
 function limiter(limit: number, options: Partial<Options> = {}) {
@@ -37,6 +37,7 @@ export const authRouter = Router();
 authRouter.use(limiter(20), cookieParser());
 
 authRouter.post("/signup", validateBody(signUpSchema), signUp);
+authRouter.post("/verify-email", validateBody(verifyEmailSchema), verifyEmail);
 authRouter.post("/signin", validateBody(signInSchema), signInLimiters, signIn);
 authRouter.post("/refresh", refresh);
 authRouter.post("/logout", logout);

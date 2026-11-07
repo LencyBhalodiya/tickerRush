@@ -23,7 +23,7 @@ npm run docs:pdf       # docs/architecture.html → docs/architecture.pdf (needs
 
 **Keep the architecture doc current.** `server/docs/architecture.pdf` is committed, and its source is `server/docs/architecture.html` (Mermaid diagrams plus tables). Any change to server routes, middleware, rate limits, security controls, tokens, models, error codes or env variables must update the HTML in the same change. That includes the "Last updated" line and the "Known gaps" table. Then run `npm run docs:pdf` and commit both files. The doc covers the back-end only.
 
-Tests use Node's built-in `node:test` and `fetch` against `app.listen(0)`, with no supertest. They connect to the same `MONGODB_URI` but override `dbName` to `ticker-rush-test`, and each test removes the accounts it creates. `node --test` runs each file in its own process, so each file gets a fresh in-memory rate limiter (20 auth requests). That's why refresh and logout tests live in `auth.session.test.ts`. There is no local MongoDB, so `npm test` needs network access to Atlas. There is no linter yet.
+Tests use Node's built-in `node:test` and `fetch` against `app.listen(0)`, with no supertest. They connect to the same `MONGODB_URI` but override `dbName` to `ticker-rush-test`, and each test removes the accounts it creates. `node --test` runs each file in its own process, so each file gets a fresh in-memory rate limiter (20 auth requests). That's why refresh and logout tests live in `auth.session.test.ts`. Tests send no email: with `NODE_ENV=test` the mailer uses nodemailer's `jsonTransport`. There is no local MongoDB, so `npm test` needs network access to Atlas. There is no linter yet.
 
 ### front-end
 
@@ -31,7 +31,7 @@ Run from `front-end/`. `npm run dev` serves on port 5173, the origin the server'
 
 Styling is plain CSS Modules, with the color tokens in `app/globals.css`, fonts loaded through `next/font`, and no UI library.
 
-- The `app/(auth)/` route group holds `/signup`, `/signin` and `/account`. They share `auth.module.css` and `ticket-form.tsx`, which provides the `Ticket` shell, `Field`, `useFieldErrors`, `nativeErrors` and `serverFieldErrors`.
+- The `app/(auth)/` route group holds `/signup`, `/signin`, `/account` and `/verify-email`. `/verify-email` is where the emailed link lands: it reads `?token=` and POSTs it only when the user presses the button, never on page load, because email scanners open every link. They share `auth.module.css` and `ticket-form.tsx`, which provides the `Ticket` shell, `Field`, `useFieldErrors`, `nativeErrors` and `serverFieldErrors`.
 - The forms copy the server's zod limits into native input constraints (`required`, `minLength`, …) and show those messages inline. 422 responses are mapped back onto the fields. The deliberately vague 401 from sign-in goes in the form banner.
 - All API calls go through `postJson` in `app/api.ts`, which sends `credentials: "include"`. Without that, the browser won't store the cross-origin `refresh_token` cookie.
 - `SessionProvider` (`app/session.tsx`, mounted in the root layout) keeps `{ user, accessToken }` in React state only, never in localStorage. On page load it restores the session from the cookie by calling `/auth/refresh` once. A module-level promise makes sure StrictMode's double effect sends only one request. The session is `undefined` while that check runs and `null` when signed out. The sign-out button is on `/account`.
@@ -61,7 +61,8 @@ Follow the `auth` module's pattern:
 ### Auth specifics
 
 - All `/auth` routes share one rate limiter: 20 requests per IP per 15 minutes, counted in memory. `/refresh` counts too, so each full page load uses one. `cookie-parser` is mounted on `authRouter` only. `/signin` also has two limiters that count only failed attempts: 5 per (IP + email) and 10 per email. Both run after validation, so the email is already normalised.
-- `signUp` returns the same `202 { message }` whether or not the email is already registered. It always hashes the password and attempts the insert. A duplicate-key error (11000) from the unique email index is logged as `signup_email_taken` and otherwise ignored. Don't add an `exists()` pre-check or bring back a 409: either one shows whether an email is registered again (a pre-check through faster replies).
+- `signUp` returns the same `202 { message }` whether or not the email is already registered. It always hashes the password and attempts the insert. A duplicate-key error (11000) from the unique email index is logged as `signup_email_taken`, and the owner gets a "someone tried to sign up" email, never a verification link. A new account starts with `emailVerifiedAt: null` and gets a verification link: an `email_verification` token (sha256-hashed, 24 h) pointing at `CORS_ORIGIN/verify-email`. That work is not awaited, so both branches answer in the same time. No email includes the user's name. Don't add an `exists()` pre-check or bring back a 409: either one shows whether an email is registered again (a pre-check through faster replies).
+- `verifyEmail` (`POST /auth/verify-email { token }`) claims the token with an atomic `findOneAndDelete` (hash, `type: "email_verification"`, not expired), so a link works once. It then sets `emailVerifiedAt` only if it is still `null`. An unknown, expired or used link gets `400 INVALID_VERIFICATION_TOKEN`.
 - `signIn` returns the same `401 INVALID_CREDENTIALS` for an unknown email and for a wrong password. For an unknown email it still checks against a dummy argon2 hash, so both cases take the same time. It returns `{ user, accessToken }` with `Cache-Control: no-store`. The refresh token is set only as a `refresh_token` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/api/v1/auth`), and its sha256 hash is stored in `AuthTokenModel`.
 - Passwords are hashed with argon2id. Fields that hold secrets (`passwordHash`, `tokenHash`) use `select: false`.
 - Access and refresh tokens are HS256 JWTs signed with `jose`, using separate secrets. Each carries a `kind` claim that verification checks.
@@ -77,4 +78,4 @@ Follow the `auth` module's pattern:
 ## Conventions
 
 - In `server/`, ESM-style imports under `module: NodeNext`, so relative imports **must** end in `.js` (`./auth.service.js`), even in `.ts` source. `front-end/` uses bundler resolution, so its imports have no extension.
-- Use zod for validation. `nodemailer` is installed but not used yet.
+- Use zod for validation. Send email with `sendEmail` from `config/mailer.ts` (nodemailer, fire-and-forget: it returns `void` and only logs failures). In development the SMTP vars point at an Ethereal test inbox, and the `email_sent` log line has a `previewUrl` for reading the message.

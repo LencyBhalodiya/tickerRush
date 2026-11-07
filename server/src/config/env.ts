@@ -9,6 +9,11 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(15),
   JWT_ACCESS_TOKEN_TTL: z.string().min(2).default("15m"),
   JWT_REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
+  SMTP_HOST: z.string().min(1),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65_535).default(587),
+  SMTP_USER: z.string().min(1),
+  SMTP_PASS: z.string().min(1),
+  MAIL_FROM: z.string().min(1).default("tickerRush <no-reply@tickerrush.dev>"),
 });
 
 export type Environment = z.infer<typeof envSchema>;

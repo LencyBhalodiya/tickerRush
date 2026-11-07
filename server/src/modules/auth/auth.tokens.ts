@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { config } from "../../config/env.js";
 import { AppError } from "../../common/errors/app-error.js";
@@ -47,6 +47,11 @@ export async function createAuthTokens(user: AuthUser, authTime = new Date()): P
  */
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+/** A single-use secret for an emailed link: 32 random bytes, base64url so it goes into a URL as-is. */
+export function createLinkToken(): string {
+  return randomBytes(32).toString("base64url");
 }
 
 export async function verifyAccessToken(token: string): Promise<AuthenticatedUser> {

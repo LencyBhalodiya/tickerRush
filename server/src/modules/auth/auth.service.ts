@@ -1,10 +1,12 @@
 import argon2 from "argon2";
 import type { HydratedDocument } from "mongoose";
 import { AppError } from "../../common/errors/app-error.js";
+import { config } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
+import { sendEmail } from "../../config/mailer.js";
 import { AuthTokenModel, type AuthToken } from "./auth-token.model.js";
 import { AuthAccountModel, type AuthAccount } from "./auth.model.js";
-import { createAuthTokens, hashToken, sessionEnded, verifyRefreshToken } from "./auth.tokens.js";
+import { createAuthTokens, createLinkToken, hashToken, sessionEnded, verifyRefreshToken } from "./auth.tokens.js";
 import type { AuthTokens, AuthUser, SignInInput, SignUpInput } from "./auth.types.js";
 
 const HASH_OPTIONS = {
@@ -21,6 +23,8 @@ const dummyHash = argon2.hash("timing-equaliser", HASH_OPTIONS);
 // the second one also gets a fresh pair instead of setting off reuse detection.
 const ROTATION_GRACE_MS = 10_000;
 
+const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+
 type Client = Pick<AuthToken, "userAgent" | "ipAddress">;
 type Session = { user: AuthUser; tokens: AuthTokens };
 
@@ -33,11 +37,54 @@ export async function signUp(input: SignUpInput): Promise<void> {
   try {
     const account = await AuthAccountModel.create({ name: input.name, email: input.email, passwordHash });
     logger.info({ event: "signup_succeeded", userId: account.id, role: account.role }, "User account created");
+
+    // Not awaited: the reply must not wait for the token insert, or a new email would answer slower than a taken one.
+    // The catch is required: an unhandled rejection shuts the whole server down (server.ts).
+    sendVerificationEmail(account).catch((error: unknown) => {
+      logger.error({ event: "verification_email_failed", userId: account.id, err: error }, "Verification email failed");
+    });
   } catch (error) {
     if (!isDuplicateKeyError(error)) throw error;
-    // ponytail: the real owner isn't told; email them here once email sending exists.
     logger.warn({ event: "signup_email_taken" }, "Sign-up for an existing email ignored");
+
+    // Tell the real owner. Never a verification link here: it would verify whoever registered this email first.
+    sendEmail({
+      to: input.email,
+      subject: "Someone tried to sign up with your email",
+      text: [
+        "Someone just tried to create a tickerRush account with this email address.",
+        "",
+        "If it was you: you already have an account, so sign in instead.",
+        "If it wasn't you: your account is safe and nothing has changed. You can ignore this email.",
+      ].join("\n"),
+    });
   }
+}
+
+// The name is left out on purpose: anyone can sign up with someone else's address and put a phishing line in the name.
+async function sendVerificationEmail(account: HydratedDocument<AuthAccount>): Promise<void> {
+  const token = createLinkToken();
+  await AuthTokenModel.create({
+    tokenHash: hashToken(token),
+    userId: account._id,
+    type: "email_verification",
+    expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS),
+  });
+
+  // CORS_ORIGIN is the front-end's address. The link opens a page there, which POSTs the token back to the API.
+  const link = new URL("/verify-email", config.CORS_ORIGIN);
+  link.searchParams.set("token", token);
+
+  sendEmail({
+    to: account.email,
+    subject: "Confirm your email for tickerRush",
+    text: [
+      "Confirm your email address to finish signing up:",
+      link.href,
+      "",
+      "The link works once and expires in 24 hours. If you didn't sign up, ignore this email.",
+    ].join("\n"),
+  });
 }
 
 export async function signIn(input: SignInInput, client: Client): Promise<Session> {
@@ -56,6 +103,22 @@ export async function signIn(input: SignInInput, client: Client): Promise<Sessio
   const session = await issueTokens(account, client);
   logger.info({ event: "signin_succeeded", userId: account.id }, "User signed in");
   return session;
+}
+
+// Atomic, like the refresh claim: of two clicks on the same link, only one finds the record.
+export async function verifyEmail(token: string): Promise<void> {
+  const record = await AuthTokenModel.findOneAndDelete({
+    tokenHash: hashToken(token),
+    type: "email_verification",
+    expiresAt: { $gt: new Date() },
+  });
+  if (!record) {
+    throw new AppError(400, "This link has expired or was already used.", "INVALID_VERIFICATION_TOKEN");
+  }
+
+  // Only when still unverified, so a second link (after a resend) can't move the original date.
+  await AuthAccountModel.updateOne({ _id: record.userId, emailVerifiedAt: null }, { emailVerifiedAt: new Date() });
+  logger.info({ event: "email_verified", userId: String(record.userId) }, "Email verified");
 }
 
 // Records are only ever *revoked* by rotation; logout and reuse detection delete them.

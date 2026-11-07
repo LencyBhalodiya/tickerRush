@@ -6,6 +6,7 @@ export type AuthAccount = {
   email: string;
   passwordHash: string;
   role: UserRole;
+  emailVerifiedAt: Date | null;
 };
 
 const authAccountSchema = new Schema<AuthAccount>(
@@ -14,6 +15,8 @@ const authAccountSchema = new Schema<AuthAccount>(
     email: { type: String, required: true, trim: true, lowercase: true, unique: true },
     passwordHash: { type: String, required: true, select: false },
     role: { type: String, enum: USER_ROLES, default: "user", required: true },
+    // null until the emailed verification link is used.
+    emailVerifiedAt: { type: Date, default: null },
   },
   { timestamps: true, versionKey: false },
 );

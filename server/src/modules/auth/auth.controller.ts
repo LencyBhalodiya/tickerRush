@@ -1,16 +1,29 @@
 import type { Request, RequestHandler, Response } from "express";
 import * as authService from "./auth.service.js";
-import type { AuthResponse, AuthTokens, AuthUser, SignInInput, SignUpInput, SignUpResponse } from "./auth.types.js";
+import type {
+  AuthResponse,
+  AuthTokens,
+  AuthUser,
+  MessageResponse,
+  SignInInput,
+  SignUpInput,
+  VerifyEmailInput,
+} from "./auth.types.js";
 
 // HttpOnly keeps the refresh token away from page scripts; Path limits it to the auth endpoints.
 // Browsers treat http://localhost as secure, so Secure also works in development.
 // clearCookie must get the same options, or the browser treats it as a different cookie and keeps this one.
 const REFRESH_COOKIE = { httpOnly: true, secure: true, sameSite: "strict", path: "/api/v1/auth" } as const;
 
-export const signUp: RequestHandler<never, SignUpResponse, SignUpInput> = async (req, res) => {
+export const signUp: RequestHandler<never, MessageResponse, SignUpInput> = async (req, res) => {
   await authService.signUp(req.body);
   // 202, not 201: the reply is identical whether or not an account was created.
   res.status(202).json({ message: "Sign-up received. Sign in to continue." });
+};
+
+export const verifyEmail: RequestHandler<never, MessageResponse, VerifyEmailInput> = async (req, res) => {
+  await authService.verifyEmail(req.body.token);
+  res.status(200).json({ message: "Email confirmed. You can sign in now." });
 };
 
 export const signIn: RequestHandler<never, AuthResponse, SignInInput> = async (req, res) => {
