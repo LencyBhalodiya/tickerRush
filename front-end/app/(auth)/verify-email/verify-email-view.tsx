@@ -59,7 +59,8 @@ export function VerifyEmailView({ token }: { token?: string }) {
           <p className={styles.kicker}>Ticket void</p>
           <h2 className={styles.title}>This link no longer works.</h2>
           <p className={styles.successText}>
-            It has expired or was already used. If you&rsquo;ve already confirmed your email, just sign in.
+            It has expired or was already used. Sign in: if your email still needs confirming, you can send
+            yourself a new link from there.
           </p>
           <SignInLink />
         </div>

@@ -46,6 +46,8 @@ before(async () => {
   await once(server, "listening");
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v1/auth`;
   assert.equal((await post("/signup", undefined, { name: "Session Test", email, password })).status, 202);
+  // Sign-in needs a confirmed email; these tests are about sessions, so skip the link.
+  await AuthAccountModel.updateOne({ email }, { emailVerifiedAt: new Date() });
 });
 
 after(async () => {

@@ -1,14 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, type ChangeEvent, type CSSProperties, type SubmitEvent } from "react";
+import { useRef, useState, type ChangeEvent, type SubmitEvent } from "react";
 import { flushSync } from "react-dom";
 import { postJson } from "../../api";
 import styles from "../auth.module.css";
-import { Field, nativeErrors, PasswordToggle, serverFieldErrors, Ticket, useFieldErrors } from "../ticket-form";
-
-// Mirrors signUpSchema in server/src/modules/auth/auth.validation.ts; the server stays the source of truth.
-const MIN_PASSWORD = 12;
+import {
+  Field,
+  MIN_PASSWORD,
+  nativeErrors,
+  PasswordLengthHint,
+  PasswordToggle,
+  serverFieldErrors,
+  Ticket,
+  useFieldErrors,
+} from "../ticket-form";
 
 export function SignupForm() {
   const { errors, showErrors, clearError } = useFieldErrors();
@@ -63,11 +69,13 @@ export function SignupForm() {
           <span className={styles.stamp} aria-hidden="true">
             Issued
           </span>
-          <p className={styles.kicker}>Admit one · Confirmed</p>
+          <p className={styles.kicker}>Admit one · Check your inbox</p>
           <h2 ref={successRef} tabIndex={-1} className={styles.title}>
-            You&rsquo;re in, {firstName}.
+            Almost there, {firstName}.
           </h2>
-          <p className={styles.successText}>Your TicketRush account is ready. Sign in to start holding seats.</p>
+          <p className={styles.successText}>
+            We&rsquo;ve emailed you a link to confirm your address. Open it, then sign in to start holding seats.
+          </p>
           <Link href="/signin" className={styles.submit}>
             <span>Sign in</span>
             <span className={styles.arrow} aria-hidden="true">
@@ -127,21 +135,7 @@ export function SignupForm() {
           minLength={MIN_PASSWORD}
           maxLength={128}
           action={<PasswordToggle shown={showPassword} onToggle={() => setShowPassword((shown) => !shown)} />}
-          hint={
-            <>
-              <span
-                className={styles.meter}
-                data-full={passwordLength >= MIN_PASSWORD || undefined}
-                style={{ "--fill": Math.min(passwordLength / MIN_PASSWORD, 1) } as CSSProperties}
-                aria-hidden="true"
-              />
-              {passwordLength === 0
-                ? `At least ${MIN_PASSWORD} characters`
-                : passwordLength < MIN_PASSWORD
-                  ? `${MIN_PASSWORD - passwordLength} more to go`
-                  : "Long enough"}
-            </>
-          }
+          hint={<PasswordLengthHint length={passwordLength} />}
         />
 
         <button type="submit" className={styles.submit} disabled={pending}>

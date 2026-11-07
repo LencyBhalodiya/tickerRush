@@ -13,5 +13,14 @@ export const signUpSchema = z.object({
 // No minimum here, so tightening the signup rule never locks out existing passwords.
 export const signInSchema = z.object({ email, password: z.string().min(1).max(128) });
 
-// Real tokens are 43 characters; the cap only stops huge bodies being hashed.
-export const verifyEmailSchema = z.object({ token: z.string().min(1).max(128) });
+// Real link tokens are 43 characters; the cap only stops huge bodies being hashed.
+const linkToken = z.string().min(1).max(128);
+
+export const verifyEmailSchema = z.object({ token: linkToken });
+
+export const resendVerificationSchema = z.object({ email });
+
+export const forgotPasswordSchema = z.object({ email });
+
+// Same password rule as sign-up: a new password must pass what a new account's would.
+export const resetPasswordSchema = z.object({ token: linkToken, password });

@@ -161,7 +161,7 @@
     <ul class="chips">
       <li>Express 5</li><li>MongoDB Atlas · Mongoose 9</li><li>TypeScript</li><li>Node 24</li><li>zod · jose · argon2</li>
     </ul>
-    <p class="updated">Last updated 7 Nov 2026 · verification emails at sign-up, and <code>POST /verify-email</code></p>
+    <p class="updated">Last updated 7 Nov 2026 · password reset: forgot-password and reset-password</p>
   </div>
   <nav class="toc">
     <p class="toc-title">Contents</p>
@@ -312,31 +312,30 @@ flowchart LR
 <!-- ═════════════════════════════ 04 ═════════════════════════════ -->
 <section class="slide" id="s4">
   <header class="sh"><span class="num">04</span><div><h2>Auth router</h2><p>How every <code>/api/v1/auth</code> route is guarded (<code>auth.routes.ts</code>).</p></div></header>
-  <figure data-max-h="74">
+  <figure data-max-h="88">
 <pre class="mermaid">
 flowchart LR
   in(["/api/v1/auth/*"]) --> rl["auth limiter<br>20 / IP / 15 min"]
   rl --> cp["cookieParser"]
-  cp -->|"POST /signup"| su["validateBody<br>signUpSchema"]
-  cp -->|"POST /verify-email"| ve["validateBody<br>verifyEmailSchema"]
+  cp -->|"POST /signup · /verify-email<br>· /reset-password"| v1["validateBody<br>route's schema"]
   cp -->|"POST /signin"| si["validateBody<br>signInSchema"]
-  cp -->|"POST /refresh"| rfc["controller<br>refresh"]
-  cp -->|"POST /logout"| loc["controller<br>logout"]
+  cp -->|"POST /resend-verification<br>· /forgot-password"| v2["validateBody<br>route's schema"]
+  cp -->|"POST /refresh · /logout"| ck["controller<br>reads the cookie"]
   cp -->|"other path"| nf["404 NOT_FOUND"]
-  su --> suc["controller<br>signUp"]
-  ve --> vec["controller<br>verifyEmail"]
+  v1 --> c1["controller"]
   si --> sil["sign-in limiters<br>5 / IP+email<br>10 / email<br>failures only"]
   sil --> sic["controller<br>signIn"]
-  suc --> svc["auth.service"]
+  v2 --> il["inbox limiter<br>3 / email<br>shared count"]
+  il --> c2["controller"]
+  c1 --> svc["auth.service"]
   sic --> svc
-  vec --> svc
-  rfc --> svc
-  loc --> svc
+  c2 --> svc
+  ck --> svc
   svc --> db[("MongoDB")]
   classDef err fill:#fdecea,stroke:#dc4527,color:#16130f
   classDef limit fill:#fff1b8,stroke:#c99a00,color:#16130f
   class nf err
-  class rl,sil limit
+  class rl,sil,il limit
 </pre>
     <figcaption><span class="sw limit"></span>rate limiters &nbsp; <span class="sw err"></span>error exits</figcaption>
   </figure>
@@ -347,37 +346,60 @@ flowchart LR
       <li><code>validateBody</code> parses with zod and replaces <code>req.body</code> with the clean value: trimmed, email lowercased, unknown keys dropped.</li>
       <li>The sign-in limiters run <b>after</b> validation, so <code>A@x.com</code> and <code>a@x.com</code> share one counter.</li>
       <li><code>cookieParser</code> is mounted on this router only: the <code>refresh_token</code> cookie is scoped to <code>/api/v1/auth</code>, so no other route receives it.</li>
-      <li>Any step can fail into <code>errorHandler</code>: 429 from a limiter, 422 from validation, 400 or 401 from the service.</li>
+      <li>Any step can fail into <code>errorHandler</code>: 429 from a limiter, 422 from validation, 400, 401 or 403 from the service.</li>
     </ul>
   </div>
 </section>
 
 <!-- ═════════════════════════════ 05 ═════════════════════════════ -->
 <section class="slide" id="s5">
-  <header class="sh"><span class="num">05</span><div><h2>Routes and responses</h2><p>Every endpoint, what runs in front of it, and what it can answer.</p></div></header>
+  <header class="sh"><span class="num">05</span><div><h2>Routes and responses</h2><p>Every endpoint, what runs in front of it, and what it can answer. <code>/auth</code> is <code>/api/v1/auth</code>; error codes are in section 11.</p></div></header>
   <table class="dense">
     <thead><tr><th>Route</th><th>Access</th><th>Middleware chain (after global)</th><th>Success</th><th>Errors</th></tr></thead>
     <tbody>
       <tr><td><code>GET /health</code></td><td>public</td><td>none</td><td>200 <code>{status:"ok"}</code></td><td>none</td></tr>
-      <tr><td><code>POST /api/v1/auth/signup</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(signUpSchema) → signUp</td><td>202 <code>{message}</code>, same for a new or taken email</td><td>422 · 429</td></tr>
-      <tr><td><code>POST /api/v1/auth/verify-email</code></td><td>emailed link</td><td>auth limiter → cookieParser → validateBody(verifyEmailSchema) → verifyEmail</td><td>200 <code>{message}</code>, sets <code>emailVerifiedAt</code></td><td>400 INVALID_VERIFICATION_TOKEN · 422 · 429</td></tr>
-      <tr><td><code>POST /api/v1/auth/signin</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(signInSchema) → 2 sign-in limiters → signIn</td><td>200 <code>{user, accessToken}</code> + <code>refresh_token</code> cookie</td><td>401 INVALID_CREDENTIALS · 422 · 429</td></tr>
-      <tr><td><code>POST /api/v1/auth/refresh</code></td><td><code>refresh_token</code> cookie</td><td>auth limiter → cookieParser → refresh</td><td>200 <code>{user, accessToken}</code> + new <code>refresh_token</code> cookie</td><td>401 INVALID_REFRESH_TOKEN · 429</td></tr>
-      <tr><td><code>POST /api/v1/auth/logout</code></td><td>public</td><td>auth limiter → cookieParser → logout</td><td>204, cookie cleared, always</td><td>429</td></tr>
+      <tr><td><code>POST /auth/signup</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(signUpSchema) → signUp</td><td>202 <code>{message}</code>, same for a new or taken email</td><td>422 · 429</td></tr>
+      <tr><td><code>POST /auth/verify-email</code></td><td>emailed link</td><td>auth limiter → cookieParser → validateBody(verifyEmailSchema) → verifyEmail</td><td>200 <code>{message}</code>, sets <code>emailVerifiedAt</code></td><td>400 · 422 · 429</td></tr>
+      <tr><td><code>POST /auth/resend-verification</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(resendVerificationSchema) → inbox limiter → resendVerification</td><td>202 <code>{message}</code>, same for any email</td><td>422 · 429</td></tr>
+      <tr><td><code>POST /auth/forgot-password</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(forgotPasswordSchema) → inbox limiter → forgotPassword</td><td>202 <code>{message}</code>, same for any email</td><td>422 · 429</td></tr>
+      <tr><td><code>POST /auth/reset-password</code></td><td>emailed link</td><td>auth limiter → cookieParser → validateBody(resetPasswordSchema) → resetPassword</td><td>200 <code>{message}</code>; email confirmed, every session ended</td><td>400 · 422 · 429</td></tr>
+      <tr><td><code>POST /auth/signin</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(signInSchema) → 2 sign-in limiters → signIn</td><td>200 <code>{user, accessToken}</code> + cookie</td><td>401 · 403 · 422 · 429</td></tr>
+      <tr><td><code>POST /auth/refresh</code></td><td><code>refresh_token</code> cookie</td><td>auth limiter → cookieParser → refresh</td><td>200 like sign-in, with a new cookie</td><td>401 · 429</td></tr>
+      <tr><td><code>POST /auth/logout</code></td><td>public</td><td>auth limiter → cookieParser → logout</td><td>204, cookie cleared, always</td><td>429</td></tr>
     </tbody>
   </table>
-  <h3>Response shapes</h3>
+</section>
+
+<!-- ═════════════════════════════ 05, continued ═════════════════════════════ -->
+<section class="slide" id="s5b">
+  <header class="sh"><span class="num">05</span><div><h2>Response shapes</h2><p>What the routes in section 05 send back. Every failure, from any layer, has the same shape.</p></div></header>
   <div class="cards">
     <div>
       <p class="card-label">200 · sign-in and refresh</p>
 <pre class="json">{
-  "user": { "id": "67…", "name": "Ada",
-    "email": "a@x.io", "role": "user" },
-  "accessToken": "eyJhbGci…"
+  "user": {
+    "id": "6721…", "name": "Ada",
+    "email": "ada@example.com",
+    "role": "user"
+  },
+  "accessToken": "eyJhbGciOiJIUzI1NiJ9…"
 }
-+ Set-Cookie: refresh_token=…; HttpOnly;
-  Secure; SameSite=Strict;
++ Set-Cookie: refresh_token=…;
+  HttpOnly; Secure; SameSite=Strict;
   Path=/api/v1/auth</pre>
+    </div>
+    <div>
+      <p class="card-label">200 / 202 · every other route</p>
+<pre class="json">{
+  "message": "Email confirmed.
+              You can sign in now."
+}</pre>
+    </div>
+    <div>
+      <p class="card-label">204 · logout</p>
+<pre class="json">(no body)
++ Set-Cookie: refresh_token=;
+  Expires=Thu, 01 Jan 1970 …</pre>
     </div>
     <div>
       <p class="card-label">4xx / 5xx · any error</p>
@@ -393,7 +415,8 @@ flowchart LR
   "errors": {
     "formErrors": [],
     "fieldErrors": { "password": [
-      "Too small: expected string…" ] }
+      "Too small: expected string
+       to have >=12 characters" ] }
   }
 }</pre>
     </div>
@@ -402,13 +425,14 @@ flowchart LR
 
 <!-- ═════════════════════════════ 06 ═════════════════════════════ -->
 <section class="slide" id="s6">
-  <header class="sh"><span class="num">06</span><div><h2>Rate limits</h2><p>Three layers, each stopping a different kind of password guessing.</p></div></header>
+  <header class="sh"><span class="num">06</span><div><h2>Rate limits</h2><p>Four limiters: three stop password guessing, one stops inbox flooding.</p></div></header>
   <table class="dense">
     <thead><tr><th>Limiter</th><th>Applies to</th><th>Counted per</th><th>Limit</th><th>What counts</th><th>Stops</th></tr></thead>
     <tbody>
       <tr><td>Auth limiter</td><td>every request under <code>/api/v1/auth</code></td><td>client IP</td><td>20 / 15 min</td><td>every request</td><td>one machine spraying requests</td></tr>
       <tr><td>Sign-in · IP + email</td><td><code>POST /signin</code>, after validation</td><td>IP + normalised email</td><td>5 / 15 min</td><td>failures only (status ≥ 400)</td><td>guessing one password from one machine</td></tr>
       <tr><td>Sign-in · email</td><td><code>POST /signin</code>, after validation</td><td>normalised email, any IP</td><td>10 / 15 min</td><td>failures only</td><td>guessing one password from many machines</td></tr>
+      <tr><td>Inbox · email</td><td><code>POST /resend-verification</code> and <code>/forgot-password</code>, one shared count, after validation</td><td>normalised email, any IP</td><td>3 / 15 min</td><td>every request</td><td>flooding one inbox with links</td></tr>
     </tbody>
   </table>
   <figure data-max-h="46" style="margin-top:4mm">
@@ -503,7 +527,9 @@ sequenceDiagram
   Note over S,DB: argon2.verify against the account's hash,<br>or a dummy hash when there is no account
   alt unknown email or wrong password
     S-->>B: 401 INVALID_CREDENTIALS
-  else password matches
+  else password matches, email not confirmed
+    S-->>B: 403 EMAIL_NOT_VERIFIED
+  else password matches, email confirmed
     Note over S,DB: sign access JWT (15 min)<br>+ refresh JWT (7 days, random jti)
     S->>DB: save sha256(refresh), userId, expiresAt, UA, IP
     S-->>C: user + tokens
@@ -516,6 +542,7 @@ sequenceDiagram
       <h4>Key points</h4>
       <ul>
         <li>Unknown email and wrong password get the <b>same</b> 401 body, and the dummy hash makes them take the same time.</li>
+        <li>403 for an unconfirmed email comes only <b>after</b> the password matches, so it reveals nothing.</li>
         <li>The access token goes in the body. The refresh token goes <b>only</b> in the cookie.</li>
         <li>Only a sha256 of the refresh token is stored, with user-agent and IP for a future "your devices" list.</li>
         <li>JWT <code>exp</code>, database <code>expiresAt</code> and cookie <code>Expires</code> come from one Date.</li>
@@ -630,7 +657,7 @@ flowchart TB
 </pre>
       </figure>
     </div>
-    <table>
+    <table class="dense">
       <thead><tr><th>Code</th><th>Status</th><th>Raised by</th></tr></thead>
       <tbody>
         <tr><td>VALIDATION_ERROR</td><td>422</td><td><code>validateBody</code> (zod)</td></tr>
@@ -641,6 +668,8 @@ flowchart TB
         <tr><td>FORBIDDEN</td><td>403</td><td><code>requireRole</code></td></tr>
         <tr><td>NOT_FOUND</td><td>404</td><td><code>notFoundHandler</code></td></tr>
         <tr><td>INVALID_REFRESH_TOKEN</td><td>401</td><td><code>refresh</code>: cookie missing, invalid, expired, logged out or reused</td></tr>
+        <tr><td>EMAIL_NOT_VERIFIED</td><td>403</td><td><code>signIn</code>: right password, email not confirmed</td></tr>
+        <tr><td>INVALID_RESET_TOKEN</td><td>400</td><td><code>resetPassword</code>: link unknown, expired or already used</td></tr>
         <tr><td>INVALID_VERIFICATION_TOKEN</td><td>400</td><td><code>verifyEmail</code>: link unknown, expired or already used</td></tr>
         <tr><td>INTERNAL_SERVER_ERROR</td><td>500</td><td>anything unexpected</td></tr>
       </tbody>
@@ -732,8 +761,8 @@ flowchart TB
   <table class="dense">
     <thead><tr><th style="width:52mm">Threat</th><th>Control</th><th style="width:62mm">Where</th></tr></thead>
     <tbody>
-      <tr><td>Stolen database → passwords</td><td>argon2id, 19 MiB memory, 2 passes, 1 thread (OWASP minimum). Hash not selected by default.</td><td><code>auth.service.ts</code>, <code>auth.model.ts</code></td></tr>
-      <tr><td>Stolen database → sessions</td><td>Only sha256 hashes of refresh tokens are stored.</td><td><code>auth.tokens.ts</code> · hashToken</td></tr>
+      <tr><td>Stolen database</td><td>Passwords: argon2id, 19 MiB, 2 passes, 1 thread (OWASP minimum), not selected by default. Refresh and link tokens: only sha256 hashes.</td><td><code>auth.service.ts</code>, <code>auth.tokens.ts</code></td></tr>
+      <tr><td>Someone registered your email first</td><td>They can't sign in until it's confirmed, and links only go to the inbox. A reset sets your password, confirms the email and deletes every refresh token.</td><td><code>auth.service.ts</code> · resetPassword</td></tr>
       <tr><td>Password guessing</td><td>Three layered rate limits (section 06).</td><td><code>auth.routes.ts</code></td></tr>
       <tr><td>Email enumeration</td><td>Sign-in: identical 401, plus a dummy argon2 verify so timing matches. Sign-up: identical 202, always one hash and one insert, no pre-check.</td><td><code>auth.service.ts</code> · signIn, signUp</td></tr>
       <tr><td>Stolen refresh token</td><td>Rotated on every use. A rotated token coming back (after a 10-second grace) deletes every refresh token of that user. Sessions end 30 days after sign-in regardless.</td><td><code>auth.service.ts</code> · refresh</td></tr>
@@ -776,15 +805,15 @@ flowchart TB
     <div class="points">
       <h4>Testing · <code>npm test</code></h4>
       <ul>
-        <li>Node's built-in <code>node:test</code> over <code>src/**/*.test.ts</code>, with <code>NODE_ENV=test</code>.</li>
+        <li>Node's built-in <code>node:test</code> over <code>src/**/*.test.ts</code>. <code>NODE_ENV=test</code> turns logs off and makes the mailer's <code>jsonTransport</code> send nothing.</li>
         <li>Starts the real app on a random port and calls it with <code>fetch</code>; no supertest.</li>
         <li>Same <code>MONGODB_URI</code>, but <code>dbName</code> is overridden to <code>ticker-rush-test</code>. Tests delete what they create.</li>
-        <li>No email is sent: with <code>NODE_ENV=test</code> the mailer uses nodemailer's <code>jsonTransport</code>.</li>
       </ul>
       <h4 style="margin-top:5mm">Covered today</h4>
       <ul>
         <li>Sign-in: token, cookie flags, hash-only storage, identical 401s, 429 on the 6th failure.</li>
-        <li>Sign-up: a taken email looks identical to a new one; a new account gets one 24-hour verification token, stored as a hash.</li>
+        <li>Sign-up: a taken email looks identical to a new one.</li>
+        <li>Email links: each works once; resend and forgot reply the same to any email; a reset ends every session.</li>
         <li>Refresh: rotation, grace window, reuse ends every session, 30-day cap.</li>
         <li>Logout: 204 with or without a cookie; the token stops working.</li>
       </ul>
@@ -801,10 +830,9 @@ flowchart TB
       <tr><td>JWT secrets only need 15 chars</td><td>A short HS256 secret can be brute-forced offline from any token.</td><td>Raise the zod minimum to 32, as <code>.env.example</code> already says.</td></tr>
       <tr><td>Rate limits in memory</td><td>Fine for one process; each extra instance multiplies the real limit.</td><td>Move to a Redis store when running more than one instance.</td></tr>
       <tr><td><code>trust proxy</code> not set</td><td>Behind Nginx or a load balancer every client shares the proxy's IP, so one user can rate-limit everyone.</td><td>Set it to the proxy hop count at deploy time.</td></tr>
-      <tr><td>Email verification unfinished</td><td>Links can be confirmed, but sign-in doesn't check <code>emailVerifiedAt</code> yet. No password reset either.</td><td>Block unverified sign-in and add a resend endpoint, then password reset.</td></tr>
-      <tr><td>Sign-up can email any address</td><td>Only the auth limiter (20 per IP per 15 min) slows inbox flooding.</td><td>Per-email limit on sign-up and resend.</td></tr>
+      <tr><td>Sign-up can email any address</td><td>No per-email limit, only the auth limiter (20 per IP per 15 min).</td><td>Per-email limit, like resend.</td></tr>
       <tr><td>Emails are fire-and-forget <span class="tag trade">trade-off</span></td><td>Lost if the mail server fails or the process stops first; only logged.</td><td>BullMQ queue on Redis, with retries.</td></tr>
-      <tr><td>Access token after logout <span class="tag trade">trade-off</span></td><td>Stays valid for up to 15 minutes after logout or reuse detection.</td><td>Keep it short-lived. Add a <code>jti</code> denylist only if a route needs instant revocation.</td></tr>
+      <tr><td>Access token after logout <span class="tag trade">trade-off</span></td><td>Stays valid for up to 15 minutes after logout, reuse detection or a password reset.</td><td>Keep it short-lived. Add a <code>jti</code> denylist only if a route needs instant revocation.</td></tr>
       <tr><td>Lost refresh response <span class="tag trade">trade-off</span></td><td>If the new cookie never arrives and the browser retries after the 10-second grace, reuse detection signs the user out everywhere.</td><td>Accepted: safer than letting an old token work indefinitely.</td></tr>
       <tr><td>Refresh shares the auth limiter <span class="tag trade">trade-off</span></td><td>Every full page load spends 1 of the 20 requests per 15 minutes.</td><td>Give <code>/refresh</code> its own, higher limit if users hit 429.</td></tr>
       <tr><td>Per-email lockout <span class="tag trade">trade-off</span></td><td>An attacker can block a user's sign-in for up to 15 minutes.</td><td>Accepted for now; revisit with CAPTCHA or progressive delays.</td></tr>

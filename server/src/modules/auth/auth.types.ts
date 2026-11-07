@@ -1,5 +1,12 @@
 import type { z } from "zod";
-import type { signInSchema, signUpSchema, verifyEmailSchema } from "./auth.validation.js";
+import type {
+  forgotPasswordSchema,
+  resendVerificationSchema,
+  resetPasswordSchema,
+  signInSchema,
+  signUpSchema,
+  verifyEmailSchema,
+} from "./auth.validation.js";
 
 export type AuthUser = {
   id: string;
@@ -20,6 +27,9 @@ export type AuthTokens = {
 export type SignUpInput = z.infer<typeof signUpSchema>;
 export type SignInInput = z.infer<typeof signInSchema>;
 export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
+export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
 export type AuthResponse = {
   user: AuthUser;

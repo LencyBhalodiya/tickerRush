@@ -1,8 +1,11 @@
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { useState, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import styles from "./auth.module.css";
 
 type FieldErrors = Partial<Record<string, string>>;
+
+// Mirrors the password rule in server/src/modules/auth/auth.validation.ts; the server stays the source of truth.
+export const MIN_PASSWORD = 12;
 
 export function useFieldErrors() {
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -77,6 +80,25 @@ export function Field({ name, label, error, hint, action, ...input }: FieldProps
         </p>
       )}
     </div>
+  );
+}
+
+/** The hint under a new-password field: a meter that fills up to MIN_PASSWORD characters. */
+export function PasswordLengthHint({ length }: { length: number }) {
+  return (
+    <>
+      <span
+        className={styles.meter}
+        data-full={length >= MIN_PASSWORD || undefined}
+        style={{ "--fill": Math.min(length / MIN_PASSWORD, 1) } as CSSProperties}
+        aria-hidden="true"
+      />
+      {length === 0
+        ? `At least ${MIN_PASSWORD} characters`
+        : length < MIN_PASSWORD
+          ? `${MIN_PASSWORD - length} more to go`
+          : "Long enough"}
+    </>
   );
 }
 

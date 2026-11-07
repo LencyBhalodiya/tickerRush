@@ -4,7 +4,10 @@ import type {
   AuthResponse,
   AuthTokens,
   AuthUser,
+  ForgotPasswordInput,
   MessageResponse,
+  ResendVerificationInput,
+  ResetPasswordInput,
   SignInInput,
   SignUpInput,
   VerifyEmailInput,
@@ -18,12 +21,29 @@ const REFRESH_COOKIE = { httpOnly: true, secure: true, sameSite: "strict", path:
 export const signUp: RequestHandler<never, MessageResponse, SignUpInput> = async (req, res) => {
   await authService.signUp(req.body);
   // 202, not 201: the reply is identical whether or not an account was created.
-  res.status(202).json({ message: "Sign-up received. Sign in to continue." });
+  res.status(202).json({ message: "Check your inbox for a link to confirm your email, then sign in." });
 };
 
 export const verifyEmail: RequestHandler<never, MessageResponse, VerifyEmailInput> = async (req, res) => {
   await authService.verifyEmail(req.body.token);
   res.status(200).json({ message: "Email confirmed. You can sign in now." });
+};
+
+// 202 whatever the email: the reply never shows whether it's registered or already verified.
+export const resendVerification: RequestHandler<never, MessageResponse, ResendVerificationInput> = async (req, res) => {
+  await authService.resendVerification(req.body.email);
+  res.status(202).json({ message: "If that email still needs confirming, a new link is on its way." });
+};
+
+// 202 whatever the email: the reply never shows whether it's registered.
+export const forgotPassword: RequestHandler<never, MessageResponse, ForgotPasswordInput> = async (req, res) => {
+  await authService.forgotPassword(req.body.email);
+  res.status(202).json({ message: "If that email is registered, a reset link is on its way." });
+};
+
+export const resetPassword: RequestHandler<never, MessageResponse, ResetPasswordInput> = async (req, res) => {
+  await authService.resetPassword(req.body);
+  res.status(200).json({ message: "Password changed. Sign in with your new password." });
 };
 
 export const signIn: RequestHandler<never, AuthResponse, SignInInput> = async (req, res) => {
