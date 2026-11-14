@@ -14,20 +14,19 @@ const transport = nodemailer.createTransport(
         secure: config.SMTP_PORT === 465,
         requireTLS: true,
         auth: { user: config.SMTP_USER, pass: config.SMTP_PASS },
+        // nodemailer waits up to 2 minutes to connect and 10 for a silent server. A hung send holds one of the
+        // email worker's few slots, so fail sooner and let the job's retry try again.
+        connectionTimeout: 10_000,
+        socketTimeout: 30_000,
       },
 );
 
 type Email = { to: string; subject: string; text: string };
 
-// Fire-and-forget: returns before the email goes out, so a slow or failing mail server never delays or fails a request.
-// ponytail: an email is lost if sending fails or the process stops first; move to a BullMQ queue for retries.
-export function sendEmail(email: Email): void {
-  transport.sendMail({ from: config.MAIL_FROM, ...email }).then(
-    (info) => {
-      // Ethereal only: a link to read the email in the browser. Real providers return false.
-      const previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
-      logger.info({ event: "email_sent", messageId: info.messageId, previewUrl }, "Email sent");
-    },
-    (error: unknown) => logger.error({ event: "email_failed", err: error }, "Email failed"),
-  );
+// Called by the email worker (auth.emails.ts), never by a request: a failure throws, and BullMQ retries the job.
+export async function sendEmail(email: Email): Promise<void> {
+  const info = await transport.sendMail({ from: config.MAIL_FROM, ...email });
+  // Ethereal only: a link to read the email in the browser. Real providers return false.
+  const previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
+  logger.info({ event: "email_sent", messageId: info.messageId, previewUrl }, "Email sent");
 }

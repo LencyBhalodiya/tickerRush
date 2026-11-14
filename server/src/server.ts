@@ -2,10 +2,13 @@ import { app } from "./app.js";
 import { connectDatabase, disconnectDatabase } from "./config/database.js";
 import { config } from "./config/env.js";
 import { logger } from "./config/logger.js";
+import { authEmailQueue, connectEmailQueue, startEmailWorker } from "./modules/auth/auth.emails.js";
 
 async function startServer(): Promise<void> {
   try {
     await connectDatabase();
+    await connectEmailQueue();
+    const emailWorker = startEmailWorker();
     const server = app.listen(config.PORT, () => {
       logger.info({ port: config.PORT }, "HTTP server started");
     });
@@ -24,10 +27,13 @@ async function startServer(): Promise<void> {
         }
 
         try {
+          // Waits for the emails being sent right now; queued ones stay in Redis for the next start.
+          await emailWorker.close();
+          await authEmailQueue.close();
           await disconnectDatabase();
           logger.info({ signal }, "Graceful shutdown completed");
         } catch (error) {
-          logger.error({ err: error }, "Failed to disconnect from MongoDB");
+          logger.error({ err: error }, "Failed to disconnect from Redis or MongoDB");
           exitCode = 1;
         } finally {
           process.exit(exitCode);
@@ -47,7 +53,7 @@ async function startServer(): Promise<void> {
       void shutdown("unhandledRejection", 1);
     });
   } catch (error) {
-    logger.fatal({ err: error }, "Failed to connect to MongoDB; server was not started");
+    logger.fatal({ err: error }, "Failed to connect to MongoDB or Redis; server was not started");
     process.exit(1);
   }
 }

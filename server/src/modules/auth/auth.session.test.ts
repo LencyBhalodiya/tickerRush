@@ -8,6 +8,7 @@ import mongoose from "mongoose";
 import { app } from "../../app.js";
 import { config } from "../../config/env.js";
 import { AuthTokenModel } from "./auth-token.model.js";
+import { authEmailQueue, startEmailWorker } from "./auth.emails.js";
 import { AuthAccountModel } from "./auth.model.js";
 import { createAuthTokens, hashToken } from "./auth.tokens.js";
 
@@ -17,6 +18,7 @@ const password = "correct horse battery";
 const DAY_MS = 24 * 60 * 60 * 1000;
 let server: Server;
 let baseUrl: string;
+let emailWorker: ReturnType<typeof startEmailWorker>;
 
 function post(path: string, cookie?: string, body?: object) {
   return fetch(`${baseUrl}${path}`, {
@@ -42,6 +44,8 @@ async function signIn(): Promise<string> {
 
 before(async () => {
   await mongoose.connect(config.MONGODB_URI, { dbName: "ticker-rush-test" });
+  // Emails are sent by the worker, as in the real server. Tests use their own Redis key prefix.
+  emailWorker = startEmailWorker();
   server = app.listen(0);
   await once(server, "listening");
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v1/auth`;
@@ -56,6 +60,8 @@ after(async () => {
   await AuthAccountModel.deleteOne({ _id: account?._id });
   server.closeAllConnections();
   server.close();
+  await emailWorker.close();
+  await authEmailQueue.close();
   await mongoose.disconnect();
 });
 

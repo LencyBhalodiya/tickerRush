@@ -159,9 +159,9 @@
     <h1>Backend<br><span>architecture</span></h1>
     <p class="cover-lede">How a request moves through the API, how sign-up, sign-in, refresh and logout work, and which security controls and rate limits protect each route.</p>
     <ul class="chips">
-      <li>Express 5</li><li>MongoDB Atlas · Mongoose 9</li><li>TypeScript</li><li>Node 24</li><li>zod · jose · argon2</li>
+      <li>Express 5</li><li>MongoDB Atlas · Mongoose 9</li><li>Redis · BullMQ 6</li><li>TypeScript</li><li>Node 24</li><li>zod · jose · argon2</li>
     </ul>
-    <p class="updated">Last updated 7 Nov 2026 · password reset: forgot-password and reset-password</p>
+    <p class="updated">Last updated 14 Nov 2026 · email queue, step 2: BullMQ worker sends every email, with retries</p>
   </div>
   <nav class="toc">
     <p class="toc-title">Contents</p>
@@ -200,8 +200,10 @@ flowchart LR
   subgraph api["Express API · server/"]
     mw["Middleware<br>helmet · cors · pino-http · json"]
     auth["auth module<br>routes → controller → service"]
+    worker["email worker<br>same process"]
   end
   smtp["SMTP server<br>Ethereal in dev"]
+  redis[("Redis<br>auth-emails queue<br>podman in dev")]
   subgraph atlas["MongoDB Atlas cluster"]
     dev[("ticker-rush-dev<br>npm run dev")]
     test[("ticker-rush-test<br>npm test only")]
@@ -210,7 +212,10 @@ flowchart LR
   mw --> auth
   auth -->|Mongoose| dev
   auth -.->|"tests override dbName"| test
-  auth -.->|"nodemailer · fire-and-forget"| smtp
+  auth -->|"queueEmail: add job"| redis
+  redis -->|"next job"| worker
+  worker -->|"lookup · link token"| dev
+  worker -->|nodemailer| smtp
 </pre>
   </figure>
   <div class="points row" style="margin-top:5mm">
@@ -220,6 +225,7 @@ flowchart LR
       <li>CORS lets exactly one origin in (<code>CORS_ORIGIN</code>), with credentials, so the refresh cookie can travel.</li>
       <li>Only the API touches MongoDB. Dev data is in <code>ticker-rush-dev</code>; <code>npm test</code> uses <code>ticker-rush-test</code>.</li>
       <li>Dev ports: front-end 5173, API 8080 (<code>PORT</code>, default 3000).</li>
+      <li>Requests never send email. They add a job to Redis, and the worker sends it, with retries (section 07, continued).</li>
     </ul>
   </div>
 </section>
@@ -229,7 +235,7 @@ flowchart LR
   <header class="sh"><span class="num">02</span><div><h2>Code layout and layers</h2><p>Where things live, and the one-way flow between layers.</p></div></header>
   <div class="cols layout">
 <pre class="tree">server/src/
-├── <b>server.ts</b>                <i>entry: connect DB → listen → shutdown</i>
+├── <b>server.ts</b>                <i>entry: MongoDB, Redis, worker → listen</i>
 ├── <b>app.ts</b>                   <i>middleware, /health, /api/v1, errors</i>
 ├── <b>routes.ts</b>                <i>apiRouter: mounts each module</i>
 ├── config/
@@ -248,6 +254,7 @@ flowchart LR
     ├── auth.controller.ts   <i>HTTP: status, headers, cookie</i>
     ├── auth.service.ts      <i>hashing, credentials, sessions</i>
     ├── auth.tokens.ts       <i>JWT sign/verify, sha256</i>
+    ├── auth.emails.ts       <i>email queue, worker, link emails</i>
     ├── auth.middleware.ts   <i>requireAuth, requireRole</i>
     ├── auth.model.ts        <i>AuthAccount collection</i>
     ├── auth-token.model.ts  <i>AuthToken collection</i>
@@ -358,10 +365,10 @@ flowchart LR
     <thead><tr><th>Route</th><th>Access</th><th>Middleware chain (after global)</th><th>Success</th><th>Errors</th></tr></thead>
     <tbody>
       <tr><td><code>GET /health</code></td><td>public</td><td>none</td><td>200 <code>{status:"ok"}</code></td><td>none</td></tr>
-      <tr><td><code>POST /auth/signup</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(signUpSchema) → signUp</td><td>202 <code>{message}</code>, same for a new or taken email</td><td>422 · 429</td></tr>
+      <tr><td><code>POST /auth/signup</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(signUpSchema) → signUp</td><td>202 <code>{message}</code>, same for a new or taken email</td><td>422 · 429 · 503</td></tr>
       <tr><td><code>POST /auth/verify-email</code></td><td>emailed link</td><td>auth limiter → cookieParser → validateBody(verifyEmailSchema) → verifyEmail</td><td>200 <code>{message}</code>, sets <code>emailVerifiedAt</code></td><td>400 · 422 · 429</td></tr>
-      <tr><td><code>POST /auth/resend-verification</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(resendVerificationSchema) → inbox limiter → resendVerification</td><td>202 <code>{message}</code>, same for any email</td><td>422 · 429</td></tr>
-      <tr><td><code>POST /auth/forgot-password</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(forgotPasswordSchema) → inbox limiter → forgotPassword</td><td>202 <code>{message}</code>, same for any email</td><td>422 · 429</td></tr>
+      <tr><td><code>POST /auth/resend-verification</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(resendVerificationSchema) → inbox limiter → resendVerification</td><td>202 <code>{message}</code>, same for any email</td><td>422 · 429 · 503</td></tr>
+      <tr><td><code>POST /auth/forgot-password</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(forgotPasswordSchema) → inbox limiter → forgotPassword</td><td>202 <code>{message}</code>, same for any email</td><td>422 · 429 · 503</td></tr>
       <tr><td><code>POST /auth/reset-password</code></td><td>emailed link</td><td>auth limiter → cookieParser → validateBody(resetPasswordSchema) → resetPassword</td><td>200 <code>{message}</code>; email confirmed, every session ended</td><td>400 · 422 · 429</td></tr>
       <tr><td><code>POST /auth/signin</code></td><td>public</td><td>auth limiter → cookieParser → validateBody(signInSchema) → 2 sign-in limiters → signIn</td><td>200 <code>{user, accessToken}</code> + cookie</td><td>401 · 403 · 422 · 429</td></tr>
       <tr><td><code>POST /auth/refresh</code></td><td><code>refresh_token</code> cookie</td><td>auth limiter → cookieParser → refresh</td><td>200 like sign-in, with a new cookie</td><td>401 · 429</td></tr>
@@ -472,7 +479,7 @@ sequenceDiagram
   participant C as Controller
   participant S as Service
   participant DB as MongoDB
-  participant M as SMTP
+  participant Q as Redis queue
   B->>R: POST /signup {name, email, password}
   Note over R,C: auth limiter, then validateBody: trim name,<br>trim + lowercase email, password 12–128 chars
   R->>C: signUp(req)
@@ -481,14 +488,12 @@ sequenceDiagram
   S->>DB: create AuthAccount, role = "user"
   alt email already registered (E11000)
     Note over S,DB: log signup_email_taken, change nothing
-    S-)M: email the owner: someone tried to sign up
   else new email
     Note over S,DB: log signup_succeeded
-    S-)DB: email_verification token, sha256, 24 h
-    S-)M: link to CORS_ORIGIN/verify-email?token=…
   end
-  Note over S,M: not awaited: the reply never waits for these
+  S->>Q: add {kind, email}: "signup_taken" or "verification"
   C-->>B: 202 {message}, identical either way
+  Note over Q: later, the worker makes the 24 h link<br>and sends it (section 07, continued)
 </pre>
     </figure>
     <div class="points">
@@ -498,8 +503,44 @@ sequenceDiagram
         <li>zod drops unknown keys: sending <code>"role": "admin"</code> does nothing.</li>
         <li>Passwords are hashed with argon2id at the OWASP minimum cost.</li>
         <li>No <code>exists</code> pre-check: the unique email index decides, which also covers two sign-ups racing.</li>
-        <li>A taken email gets the same 202 after the same work (one hash, one insert). Token and emails are not awaited, so timing reveals nothing.</li>
+        <li>A taken email gets the same 202 after the same work: one hash, one insert, one job added to Redis. The link is made after the reply, by the worker.</li>
         <li>A taken email warns the owner but never gets a verification link (it would verify whoever registered first). No email includes the name.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ 07, continued ═════════════════════════════ -->
+<section class="slide" id="s7b">
+  <header class="sh"><span class="num">07</span><div><h2>Email queue</h2><p>How every email leaves: a job in Redis, sent by a BullMQ worker (<code>auth.emails.ts</code>).</p></div></header>
+  <div class="cols">
+    <figure data-max-h="105">
+<pre class="mermaid">
+flowchart LR
+  api["signUp · resendVerification<br>forgotPassword"] -->|"queueEmail<br>{kind, email}"| wait
+  subgraph redis["Redis · auth-emails"]
+    wait[("waiting")] --> active[("active")]
+    active -->|sent| done[("completed<br>kept 1 day, max 100")]
+    active -->|"failed, tries left"| delayed[("delayed<br>30 s · 1 · 2 · 4 · 8 min")]
+    delayed --> wait
+    active -->|"6th failure"| failed[("failed<br>kept 7 days")]
+  end
+  active --> worker["worker<br>5 at a time · 10/s"]
+  worker -->|"lookup · createLink"| db[("MongoDB")]
+  worker -->|nodemailer| smtp["SMTP"]
+  classDef err fill:#fdecea,stroke:#dc4527,color:#16130f
+  class failed err
+</pre>
+    </figure>
+    <div class="points">
+      <h4>Key points</h4>
+      <ul>
+        <li>A job holds only <code>{kind, email}</code>, never a link: a token in Redis would undo storing only its hash.</li>
+        <li>The worker does the account lookup, so resend and forgot-password do the same work (one add) for any email.</li>
+        <li>Sending fails → the job is retried after 30 s, 1, 2, 4 and 8 minutes, about 15 minutes in all.</li>
+        <li>Redis down → <code>add()</code> gives up after about 2 s and the request gets <code>503 EMAIL_UNAVAILABLE</code>, never a hang.</li>
+        <li>Shutdown waits for the emails being sent. A crash mid-send is retried after the job's lock expires (about 30 s), so an email can arrive twice; only the newer link works.</li>
+        <li>Tests use the <code>test:</code> key prefix, so the <code>npm run dev</code> worker never takes their jobs.</li>
       </ul>
     </div>
   </div>
@@ -671,6 +712,7 @@ flowchart TB
         <tr><td>EMAIL_NOT_VERIFIED</td><td>403</td><td><code>signIn</code>: right password, email not confirmed</td></tr>
         <tr><td>INVALID_RESET_TOKEN</td><td>400</td><td><code>resetPassword</code>: link unknown, expired or already used</td></tr>
         <tr><td>INVALID_VERIFICATION_TOKEN</td><td>400</td><td><code>verifyEmail</code>: link unknown, expired or already used</td></tr>
+        <tr><td>EMAIL_UNAVAILABLE</td><td>503</td><td><code>queueEmail</code>: Redis unreachable for about 2 s</td></tr>
         <tr><td>INTERNAL_SERVER_ERROR</td><td>500</td><td>anything unexpected</td></tr>
       </tbody>
     </table>
@@ -730,13 +772,18 @@ flowchart TB
     direction LR
     start(["npm run dev / start"]) --> env["config/env.ts<br>zod-parse process.env<br>invalid → crash"]
     env --> db["connectDatabase()"]
-    db -->|ok| listen["app.listen(PORT)<br>serving"]
+    db -->|ok| q["connectEmailQueue()<br>Redis ready within 10 s"]
+    q -->|ok| w["startEmailWorker()"]
+    w --> listen["app.listen(PORT)<br>serving"]
     db -->|fails| x(["log fatal · exit 1<br>never listens"])
+    q -->|fails| x
   end
   subgraph down["Shutdown · runs once"]
     direction LR
     sig(["SIGINT · SIGTERM<br>uncaughtException<br>unhandledRejection"]) --> close["server.close()<br>finish in-flight requests"]
-    close --> disc["disconnectDatabase()"]
+    close --> wc["emailWorker.close()<br>finish emails being sent"]
+    wc --> qc["authEmailQueue.close()"]
+    qc --> disc["disconnectDatabase()"]
     disc --> done(["exit 0<br>or 1 on crash / error"])
   end
   up --> down
@@ -747,9 +794,9 @@ flowchart TB
   <div class="points row" style="margin-top:5mm">
     <h4>Key points</h4>
     <ul>
-      <li>MongoDB connects <b>before</b> the port opens, so the API never takes traffic it can't serve.</li>
+      <li>MongoDB and Redis connect <b>before</b> the port opens, so the API never takes traffic it can't serve. BullMQ would wait for Redis forever, so startup gives up after 10 s.</li>
       <li>A bad or missing env variable stops the process at import time with a zod error.</li>
-      <li>On SIGINT/SIGTERM the server stops accepting, lets in-flight requests finish, then closes MongoDB.</li>
+      <li>On SIGINT/SIGTERM the server stops accepting, lets in-flight requests finish, lets the worker finish the emails it is sending, then closes Redis and MongoDB. Queued jobs wait in Redis for the next start.</li>
       <li>Crashes take the same path and exit with code 1.</li>
     </ul>
   </div>
@@ -764,7 +811,7 @@ flowchart TB
       <tr><td>Stolen database</td><td>Passwords: argon2id, 19 MiB, 2 passes, 1 thread (OWASP minimum), not selected by default. Refresh and link tokens: only sha256 hashes.</td><td><code>auth.service.ts</code>, <code>auth.tokens.ts</code></td></tr>
       <tr><td>Someone registered your email first</td><td>They can't sign in until it's confirmed, and links only go to the inbox. A reset sets your password, confirms the email and deletes every refresh token.</td><td><code>auth.service.ts</code> · resetPassword</td></tr>
       <tr><td>Password guessing</td><td>Three layered rate limits (section 06).</td><td><code>auth.routes.ts</code></td></tr>
-      <tr><td>Email enumeration</td><td>Sign-in: identical 401, plus a dummy argon2 verify so timing matches. Sign-up: identical 202, always one hash and one insert, no pre-check.</td><td><code>auth.service.ts</code> · signIn, signUp</td></tr>
+      <tr><td>Email enumeration</td><td>Sign-in: identical 401, plus a dummy argon2 verify so timing matches. Sign-up, resend, forgot: identical 202 after the same work, no pre-check.</td><td><code>auth.service.ts</code>, <code>auth.emails.ts</code></td></tr>
       <tr><td>Stolen refresh token</td><td>Rotated on every use. A rotated token coming back (after a 10-second grace) deletes every refresh token of that user. Sessions end 30 days after sign-in regardless.</td><td><code>auth.service.ts</code> · refresh</td></tr>
       <tr><td>Tokens leaking: XSS, caches</td><td>Refresh token is HttpOnly. Access token lives only in memory and expires in 15 minutes. <code>Cache-Control: no-store</code> on token responses.</td><td><code>auth.controller.ts</code>, front-end <code>session.tsx</code></td></tr>
       <tr><td>CSRF and login CSRF</td><td>SameSite=Strict cookie scoped to <code>/api/v1/auth</code>. JSON-only bodies force a CORS preflight that only <code>CORS_ORIGIN</code> passes.</td><td><code>app.ts</code>, <code>auth.controller.ts</code></td></tr>
@@ -791,7 +838,8 @@ flowchart TB
           <tr><td>NODE_ENV</td><td>development · test · production</td><td>development</td><td>log level; <code>test</code> silences logs</td></tr>
           <tr><td>PORT</td><td>1–65535</td><td>3000</td><td><code>app.listen</code> (dev: 8080)</td></tr>
           <tr><td>MONGODB_URI</td><td>required</td><td></td><td>cluster + database <code>ticker-rush-dev</code></td></tr>
-          <tr><td>CORS_ORIGIN</td><td>URL, required</td><td></td><td>the one allowed browser origin</td></tr>
+          <tr><td>REDIS_URL</td><td>redis URL, required</td><td></td><td>email queue (BullMQ)</td></tr>
+          <tr><td>CORS_ORIGIN</td><td>URL, required</td><td></td><td>allowed browser origin</td></tr>
           <tr><td>JWT_ACCESS_SECRET</td><td>≥ 15 chars <span class="tag todo">gap</span></td><td></td><td>signs access tokens</td></tr>
           <tr><td>JWT_REFRESH_SECRET</td><td>≥ 15 chars <span class="tag todo">gap</span></td><td></td><td>signs refresh tokens</td></tr>
           <tr><td>JWT_ACCESS_TOKEN_TTL</td><td>time span</td><td>15m</td><td>access token lifetime</td></tr>
@@ -807,7 +855,7 @@ flowchart TB
       <ul>
         <li>Node's built-in <code>node:test</code> over <code>src/**/*.test.ts</code>. <code>NODE_ENV=test</code> turns logs off and makes the mailer's <code>jsonTransport</code> send nothing.</li>
         <li>Starts the real app on a random port and calls it with <code>fetch</code>; no supertest.</li>
-        <li>Same <code>MONGODB_URI</code>, but <code>dbName</code> is overridden to <code>ticker-rush-test</code>. Tests delete what they create.</li>
+        <li>Same <code>MONGODB_URI</code>, but <code>dbName</code> is overridden to <code>ticker-rush-test</code>; Redis jobs use the <code>test:</code> prefix.</li>
       </ul>
       <h4 style="margin-top:5mm">Covered today</h4>
       <ul>
@@ -831,7 +879,8 @@ flowchart TB
       <tr><td>Rate limits in memory</td><td>Fine for one process; each extra instance multiplies the real limit.</td><td>Move to a Redis store when running more than one instance.</td></tr>
       <tr><td><code>trust proxy</code> not set</td><td>Behind Nginx or a load balancer every client shares the proxy's IP, so one user can rate-limit everyone.</td><td>Set it to the proxy hop count at deploy time.</td></tr>
       <tr><td>Sign-up can email any address</td><td>No per-email limit, only the auth limiter (20 per IP per 15 min).</td><td>Per-email limit, like resend.</td></tr>
-      <tr><td>Emails are fire-and-forget <span class="tag trade">trade-off</span></td><td>Lost if the mail server fails or the process stops first; only logged.</td><td>BullMQ queue on Redis, with retries.</td></tr>
+      <tr><td>Sign-up writes MongoDB, then Redis <span class="tag trade">trade-off</span></td><td>If Redis fails, sign-up deletes the new account and replies 503, so a retry starts over. A crash between the two leaves an account without an email.</td><td>Accepted: "Email me a new link" on sign-in recovers. A transactional outbox if it matters.</td></tr>
+      <tr><td>Worker in the API process <span class="tag trade">trade-off</span></td><td>Sending shares the API's CPU and restarts with it.</td><td>Start <code>startEmailWorker()</code> from its own entry file when email volume grows.</td></tr>
       <tr><td>Access token after logout <span class="tag trade">trade-off</span></td><td>Stays valid for up to 15 minutes after logout, reuse detection or a password reset.</td><td>Keep it short-lived. Add a <code>jti</code> denylist only if a route needs instant revocation.</td></tr>
       <tr><td>Lost refresh response <span class="tag trade">trade-off</span></td><td>If the new cookie never arrives and the browser retries after the 10-second grace, reuse detection signs the user out everywhere.</td><td>Accepted: safer than letting an old token work indefinitely.</td></tr>
       <tr><td>Refresh shares the auth limiter <span class="tag trade">trade-off</span></td><td>Every full page load spends 1 of the 20 requests per 15 minutes.</td><td>Give <code>/refresh</code> its own, higher limit if users hit 429.</td></tr>

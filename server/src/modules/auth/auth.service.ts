@@ -1,12 +1,11 @@
 import argon2 from "argon2";
 import type { HydratedDocument } from "mongoose";
 import { AppError } from "../../common/errors/app-error.js";
-import { config } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
-import { sendEmail } from "../../config/mailer.js";
-import { AuthTokenModel, type AuthToken, type AuthTokenType } from "./auth-token.model.js";
+import { AuthTokenModel, type AuthToken } from "./auth-token.model.js";
+import { queueEmail, type LinkType } from "./auth.emails.js";
 import { AuthAccountModel, type AuthAccount } from "./auth.model.js";
-import { createAuthTokens, createLinkToken, hashToken, sessionEnded, verifyRefreshToken } from "./auth.tokens.js";
+import { createAuthTokens, hashToken, sessionEnded, verifyRefreshToken } from "./auth.tokens.js";
 import type { AuthTokens, AuthUser, ResetPasswordInput, SignInInput, SignUpInput } from "./auth.types.js";
 
 const HASH_OPTIONS = {
@@ -23,105 +22,38 @@ const dummyHash = argon2.hash("timing-equaliser", HASH_OPTIONS);
 // the second one also gets a fresh pair instead of setting off reuse detection.
 const ROTATION_GRACE_MS = 10_000;
 
-type LinkType = Exclude<AuthTokenType, "refresh">;
-
-// Where each kind of emailed link lands on the front-end, and how long it works.
-// Reset links are short-lived: one in the wrong hands takes over the account.
-const LINKS: Record<LinkType, { path: string; ttlMs: number }> = {
-  email_verification: { path: "/verify-email", ttlMs: 24 * 60 * 60 * 1000 },
-  password_reset: { path: "/reset-password", ttlMs: 60 * 60 * 1000 },
-};
-
 type Client = Pick<AuthToken, "userAgent" | "ipAddress">;
 type Session = { user: AuthUser; tokens: AuthTokens };
 
-// A taken email ends exactly like a new one: same reply, and the same work (one hash, one insert),
-// so neither the response nor its timing confirms which emails are registered.
+// A taken email ends exactly like a new one: same reply, and the same work (one hash, one insert, one queued
+// email), so neither the response nor its timing confirms which emails are registered.
 // No exists() pre-check: it would make taken emails return faster. The unique index decides.
 export async function signUp(input: SignUpInput): Promise<void> {
   const passwordHash = await argon2.hash(input.password, HASH_OPTIONS);
+  let kind: "verification" | "signup_taken" = "verification";
+  let account: HydratedDocument<AuthAccount> | undefined;
 
   try {
-    const account = await AuthAccountModel.create({ name: input.name, email: input.email, passwordHash });
+    account = await AuthAccountModel.create({ name: input.name, email: input.email, passwordHash });
     logger.info({ event: "signup_succeeded", userId: account.id, role: account.role }, "User account created");
-
-    sendVerificationEmail(account);
   } catch (error) {
     if (!isDuplicateKeyError(error)) throw error;
     logger.warn({ event: "signup_email_taken" }, "Sign-up for an existing email ignored");
-
-    // Tell the real owner, with a way in: if someone else registered this email first, a password reset makes the
-    // account theirs. Never a verification link here: it would verify whoever registered this email first.
-    sendEmail({
-      to: input.email,
-      subject: "Someone tried to sign up with your email",
-      text: [
-        "Someone just tried to create a tickerRush account with this email address.",
-        "",
-        "If it was you: you already have an account, so sign in instead.",
-        `Forgot your password, or can't sign in? Reset it here: ${new URL("/forgot-password", config.CORS_ORIGIN).href}`,
-        "",
-        "If it wasn't you: your account is safe and nothing has changed. You can ignore this email.",
-      ].join("\n"),
-    });
+    // The owner hears that someone tried. A verification link here would verify whoever registered first.
+    kind = "signup_taken";
   }
-}
 
-// The name is left out on purpose: anyone can sign up with someone else's address and put a phishing line in the name.
-function sendVerificationEmail(account: HydratedDocument<AuthAccount>): void {
-  emailLink(account, "email_verification", (link) => ({
-    subject: "Confirm your email for tickerRush",
-    text: [
-      "Confirm your email address to finish signing up:",
-      link,
-      "",
-      "The link works once and expires in 24 hours. If you didn't sign up, ignore this email.",
-    ].join("\n"),
-  }));
-}
-
-function sendPasswordResetEmail(account: HydratedDocument<AuthAccount>): void {
-  emailLink(account, "password_reset", (link) => ({
-    subject: "Reset your tickerRush password",
-    text: [
-      "Someone asked to reset the password for this email address. Choose a new password here:",
-      link,
-      "",
-      "The link works once and expires in 1 hour. If you didn't ask, ignore this email: your password hasn't changed.",
-    ].join("\n"),
-  }));
-}
-
-// Returns at once, like sendEmail: the token insert runs after the reply, so callers answer in the same time
-// whether or not they send one. The catch is required: an unhandled rejection shuts the whole server down (server.ts).
-function emailLink(
-  account: HydratedDocument<AuthAccount>,
-  type: LinkType,
-  compose: (link: string) => { subject: string; text: string },
-): void {
-  createLink(account, type).then(
-    (link) => sendEmail({ to: account.email, ...compose(link.href) }),
-    (error: unknown) => {
-      logger.error({ event: "link_email_failed", type, userId: account.id, err: error }, "Link email failed");
-    },
-  );
-}
-
-async function createLink(account: HydratedDocument<AuthAccount>, type: LinkType): Promise<URL> {
-  // Only the newest link of each kind works: a new one makes the earlier ones useless.
-  await AuthTokenModel.deleteMany({ userId: account._id, type });
-  const token = createLinkToken();
-  await AuthTokenModel.create({
-    tokenHash: hashToken(token),
-    userId: account._id,
-    type,
-    expiresAt: new Date(Date.now() + LINKS[type].ttlMs),
-  });
-
-  // CORS_ORIGIN is the front-end's address. The link opens a page there, which POSTs the token back to the API.
-  const link = new URL(LINKS[type].path, config.CORS_ORIGIN);
-  link.searchParams.set("token", token);
-  return link;
+  try {
+    await queueEmail({ kind, email: input.email });
+  } catch (error) {
+    // No verification email can go out, so undo the sign-up: "try again" then really starts over, instead of
+    // finding the email taken. If the job reached Redis after all, the worker finds no account and sends nothing.
+    if (account) {
+      await account.deleteOne();
+      logger.warn({ event: "signup_undone", userId: account.id }, "Account removed: its email could not be queued");
+    }
+    throw error;
+  }
 }
 
 // Atomic, like the refresh claim: of two clicks on the same link, only one gets the record.
@@ -129,22 +61,15 @@ function claimLink(token: string, type: LinkType) {
   return AuthTokenModel.findOneAndDelete({ tokenHash: hashToken(token), type, expiresAt: { $gt: new Date() } });
 }
 
-// The same reply and the same awaited work (one lookup) for an unknown, verified or unverified email,
-// so this never reveals which emails are registered.
+// No lookup here: every email gets the same reply after the same work (one queued job), so this never reveals
+// which emails are registered. The worker sends a link only to an existing, unverified account.
 export async function resendVerification(email: string): Promise<void> {
-  const account = await AuthAccountModel.findOne({ email });
-  if (!account || account.emailVerifiedAt) return;
-  sendVerificationEmail(account);
-  logger.info({ event: "verification_resent", userId: account.id }, "Verification email resent");
+  await queueEmail({ kind: "verification", email });
 }
 
-// Same idea as resend: one lookup, then the email goes out after the reply, so every email gets the same reply
-// in the same time.
+// Same idea as resend: the worker sends a reset link only if the email is registered.
 export async function forgotPassword(email: string): Promise<void> {
-  const account = await AuthAccountModel.findOne({ email });
-  if (!account) return;
-  sendPasswordResetEmail(account);
-  logger.info({ event: "password_reset_requested", userId: account.id }, "Password reset requested");
+  await queueEmail({ kind: "password_reset", email });
 }
 
 export async function signIn(input: SignInInput, client: Client): Promise<Session> {

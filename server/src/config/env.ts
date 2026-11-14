@@ -4,6 +4,8 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   MONGODB_URI: z.string().min(1),
+  // redis:// or rediss:// (TLS). A bare "localhost:6379" fails here, at startup.
+  REDIS_URL: z.url({ protocol: /^rediss?$/ }),
   CORS_ORIGIN: z.url(),
   JWT_ACCESS_SECRET: z.string().min(15),
   JWT_REFRESH_SECRET: z.string().min(15),
